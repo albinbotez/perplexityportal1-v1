@@ -1,0 +1,1817 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+  <!--
+    VINIMPORT PORTAL
+    Bygget med Perplexity Computer — https://www.perplexity.ai/computer
+  -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vinimport Portal</title>
+
+  <!-- Supabase JS CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    /* ====================================================
+       DESIGN TOKENS
+       ==================================================== */
+    :root {
+      --bg-base:      #0d1117;
+      --bg-surface:   #161b22;
+      --bg-card:      #1c2330;
+      --bg-hover:     #21293a;
+      --border:       #2d3748;
+      --border-light: #3a4a5c;
+
+      --text-primary:   #e6edf3;
+      --text-secondary: #8b949e;
+      --text-muted:     #6e7681;
+
+      --accent-blue:    #388bfd;
+      --accent-blue-bg: #1c2d4a;
+      --accent-green:   #3fb950;
+      --accent-green-bg:#1a3328;
+      --accent-yellow:  #d29922;
+      --accent-yellow-bg:#2e2108;
+      --accent-red:     #f85149;
+      --accent-red-bg:  #3c1219;
+      --accent-purple:  #a371f7;
+
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+      --shadow-card: 0 1px 3px rgba(0,0,0,0.4), 0 4px 16px rgba(0,0,0,0.3);
+      --shadow-modal: 0 8px 32px rgba(0,0,0,0.6);
+    }
+
+    /* ====================================================
+       RESET & BASE
+       ==================================================== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: var(--font);
+      background: var(--bg-base);
+      color: var(--text-primary);
+      min-height: 100vh;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    a { color: var(--accent-blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    button { cursor: pointer; font-family: var(--font); }
+    input, select, textarea {
+      font-family: var(--font);
+      font-size: 14px;
+      color: var(--text-primary);
+      background: var(--bg-base);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 12px;
+      outline: none;
+      transition: border-color 0.15s;
+      width: 100%;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--accent-blue);
+      box-shadow: 0 0 0 3px rgba(56,139,253,0.15);
+    }
+    select option { background: var(--bg-surface); }
+    label { font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; display: block; font-weight: 500; }
+
+    /* ====================================================
+       LOGIN PAGE
+       ==================================================== */
+    #login-page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at 50% 0%, #1a2744 0%, var(--bg-base) 70%);
+    }
+    .login-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 400px;
+      box-shadow: var(--shadow-modal);
+    }
+    .login-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 28px;
+    }
+    .login-logo svg { width: 36px; height: 36px; }
+    .login-logo-text {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    .login-logo-text span { color: var(--accent-blue); }
+    .login-title {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      letter-spacing: -0.3px;
+    }
+    .login-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 28px;
+    }
+    .form-group { margin-bottom: 16px; }
+    .btn-primary {
+      width: 100%;
+      background: var(--accent-blue);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 10px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      transition: background 0.15s, transform 0.1s;
+      margin-top: 8px;
+    }
+    .btn-primary:hover { background: #4191ff; }
+    .btn-primary:active { transform: scale(0.99); }
+    .btn-primary:disabled { background: #2d3748; color: var(--text-muted); cursor: not-allowed; }
+    .login-error {
+      background: var(--accent-red-bg);
+      border: 1px solid var(--accent-red);
+      color: var(--accent-red);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-size: 13px;
+      margin-top: 12px;
+      display: none;
+    }
+
+    /* ====================================================
+       APP LAYOUT
+       ==================================================== */
+    #app-page { display: none; min-height: 100vh; }
+
+    /* Topbar */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(22,27,34,0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .topbar-logo svg { width: 28px; height: 28px; }
+    .topbar-brand {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+    }
+    .topbar-brand span { color: var(--accent-blue); }
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .topbar-user {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    .btn-logout {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      border-radius: var(--radius-sm);
+      padding: 6px 12px;
+      font-size: 13px;
+      transition: all 0.15s;
+    }
+    .btn-logout:hover {
+      border-color: var(--accent-red);
+      color: var(--accent-red);
+    }
+
+    /* Sidebar + Main */
+    .layout {
+      display: flex;
+      min-height: calc(100vh - 56px);
+    }
+    .sidebar {
+      width: 220px;
+      flex-shrink: 0;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border);
+      padding: 16px 0;
+      position: sticky;
+      top: 56px;
+      height: calc(100vh - 56px);
+      overflow-y: auto;
+    }
+    .sidebar-section {
+      padding: 0 12px 8px;
+      margin-top: 8px;
+    }
+    .sidebar-section-label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      padding: 0 8px;
+      margin-bottom: 4px;
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+      font-size: 13.5px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .nav-item.active { background: var(--accent-blue-bg); color: var(--accent-blue); }
+    .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+    /* Main content */
+    .main {
+      flex: 1;
+      padding: 28px 32px;
+      min-width: 0;
+    }
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .page-header {
+      margin-bottom: 24px;
+    }
+    .page-title {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      margin-bottom: 4px;
+    }
+    .page-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    /* ====================================================
+       CARDS & GRID
+       ==================================================== */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 20px;
+      box-shadow: var(--shadow-card);
+    }
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+    .card-value {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    .card-sub {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    /* ====================================================
+       TABLE
+       ==================================================== */
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+    }
+    thead tr {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      text-align: left;
+      padding: 11px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+    }
+    td {
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-primary);
+      vertical-align: middle;
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: var(--bg-hover); }
+
+    /* ====================================================
+       STATUS BADGE & CIRCLE
+       ==================================================== */
+    .status-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-dot.red    { background: var(--accent-red);    box-shadow: 0 0 6px rgba(248,81,73,0.5); }
+    .status-dot.yellow { background: var(--accent-yellow); box-shadow: 0 0 6px rgba(210,153,34,0.5); }
+    .status-dot.green  { background: var(--accent-green);  box-shadow: 0 0 6px rgba(63,185,80,0.5); }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .badge.brennevin { background: var(--accent-purple); color: #fff; opacity: 0.85; }
+    .badge.vin       { background: var(--accent-red-bg); color: var(--accent-red); border: 1px solid var(--accent-red); }
+
+    /* ====================================================
+       FORM PANELS
+       ==================================================== */
+    .form-panel {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+    .form-panel-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .form-panel-title svg { width: 18px; height: 18px; color: var(--accent-blue); }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+    }
+    .form-grid-full {
+      grid-column: 1 / -1;
+    }
+    .btn-submit {
+      background: var(--accent-blue);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 9px 20px;
+      font-size: 13.5px;
+      font-weight: 600;
+      transition: background 0.15s, transform 0.1s;
+      margin-top: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .btn-submit:hover { background: #4191ff; }
+    .btn-submit:active { transform: scale(0.98); }
+    .btn-submit:disabled { background: var(--border); color: var(--text-muted); cursor: not-allowed; }
+    .btn-secondary {
+      background: var(--bg-hover);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .btn-secondary:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+    .btn-danger {
+      background: transparent;
+      color: var(--accent-red);
+      border: 1px solid var(--accent-red-bg);
+      border-radius: var(--radius-sm);
+      padding: 5px 10px;
+      font-size: 12px;
+      transition: all 0.15s;
+    }
+    .btn-danger:hover { background: var(--accent-red-bg); border-color: var(--accent-red); }
+
+    /* ====================================================
+       TOAST
+       ==================================================== */
+    #toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .toast {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 12px 18px;
+      font-size: 13.5px;
+      box-shadow: var(--shadow-modal);
+      animation: slideUp 0.2s ease;
+      max-width: 320px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .toast.success { border-left: 3px solid var(--accent-green); }
+    .toast.error   { border-left: 3px solid var(--accent-red); }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ====================================================
+       LOADING SPINNER
+       ==================================================== */
+    .spinner {
+      width: 20px; height: 20px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent-blue);
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ====================================================
+       EMPTY STATE
+       ==================================================== */
+    .empty-state {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--text-muted);
+    }
+    .empty-state svg {
+      width: 40px; height: 40px;
+      margin: 0 auto 12px;
+      opacity: 0.4;
+      display: block;
+    }
+    .empty-state p { font-size: 14px; }
+
+    /* ====================================================
+       REPORT / EXPORT
+       ==================================================== */
+    .report-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .report-controls select { width: auto; min-width: 140px; }
+    .btn-export {
+      background: var(--accent-green-bg);
+      color: var(--accent-green);
+      border: 1px solid var(--accent-green);
+      border-radius: var(--radius-sm);
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.15s;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .btn-export:hover { background: rgba(63,185,80,0.2); }
+
+    /* ====================================================
+       FOOTER ATTRIBUTION
+       ==================================================== */
+    .attribution {
+      text-align: center;
+      padding: 16px;
+      font-size: 11px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+      margin-top: 40px;
+    }
+    .attribution a { color: var(--text-muted); }
+    .attribution a:hover { color: var(--text-secondary); }
+
+    /* ====================================================
+       SORT CONTROLS
+       ==================================================== */
+    .sort-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .sort-controls label { margin-bottom: 0; white-space: nowrap; }
+    .sort-controls select { width: auto; min-width: 140px; }
+  </style>
+</head>
+<body>
+
+<!-- ======================================================
+     LOGIN PAGE
+     ====================================================== -->
+<div id="login-page">
+  <div class="login-card">
+    <div class="login-logo">
+      <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="Vinimport logo">
+        <circle cx="18" cy="18" r="17" fill="#1c2d4a" stroke="#388bfd" stroke-width="1.5"/>
+        <path d="M10 26 C10 16 14 10 18 10 C22 10 26 16 26 26" stroke="#388bfd" stroke-width="2" stroke-linecap="round" fill="none"/>
+        <path d="M14 26 C14 20 16 16 18 16 C20 16 22 20 22 26" stroke="#a371f7" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+        <line x1="18" y1="26" x2="18" y2="28" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="14" y1="28" x2="22" y2="28" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <div class="login-logo-text">Vin<span>Import</span></div>
+    </div>
+    <div class="login-title">Logg inn</div>
+    <div class="login-subtitle">Brukere opprettes manuelt av administrator.</div>
+    <div class="form-group">
+      <label for="login-email">E-postadresse</label>
+      <input type="email" id="login-email" placeholder="din@epost.no" autocomplete="email"/>
+    </div>
+    <div class="form-group">
+      <label for="login-password">Passord</label>
+      <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password"/>
+    </div>
+    <button class="btn-primary" id="login-btn" onclick="handleLogin()">Logg inn</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<!-- ======================================================
+     APP PAGE
+     ====================================================== -->
+<div id="app-page">
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="topbar-logo">
+        <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="logo">
+          <circle cx="18" cy="18" r="17" fill="#1c2d4a" stroke="#388bfd" stroke-width="1.5"/>
+          <path d="M10 26 C10 16 14 10 18 10 C22 10 26 16 26 26" stroke="#388bfd" stroke-width="2" stroke-linecap="round" fill="none"/>
+          <path d="M14 26 C14 20 16 16 18 16 C20 16 22 20 22 26" stroke="#a371f7" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+          <line x1="18" y1="26" x2="18" y2="28" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="14" y1="28" x2="22" y2="28" stroke="#8b949e" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="topbar-brand">Vin<span>Import</span></div>
+    </div>
+    <div class="topbar-right">
+      <span class="topbar-user" id="topbar-email">—</span>
+      <button class="btn-logout" onclick="handleLogout()">Logg ut</button>
+    </div>
+  </div>
+
+  <div class="layout">
+    <!-- Sidebar -->
+    <nav class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-section-label">Oversikt</div>
+        <div class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Dashboard
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-label">Lager</div>
+        <div class="nav-item" data-page="stock-in" onclick="navigate('stock-in')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          Mottak (Inn)
+        </div>
+        <div class="nav-item" data-page="stock-out" onclick="navigate('stock-out')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          Salg (Ut)
+        </div>
+        <div class="nav-item" data-page="inventory" onclick="navigate('inventory')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+          Lagerstatus
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-label">Register</div>
+        <div class="nav-item" data-page="products" onclick="navigate('products')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          Produkter
+        </div>
+        <div class="nav-item" data-page="customers" onclick="navigate('customers')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Kunder
+        </div>
+      </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-label">Rapporter</div>
+        <div class="nav-item" data-page="report" onclick="navigate('report')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Månedlig rapport
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main content -->
+    <main class="main">
+
+      <!-- ===================== DASHBOARD ===================== -->
+      <div class="page active" id="page-dashboard">
+        <div class="page-header">
+          <div class="page-title">Dashboard</div>
+          <div class="page-subtitle" id="dashboard-month-label">Denne måneden</div>
+        </div>
+
+        <div class="stats-grid" id="dashboard-stats">
+          <div class="card">
+            <div class="card-title">Solgte flasker</div>
+            <div class="card-value" id="stat-bottles">—</div>
+            <div class="card-sub">denne måneden</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Særavgift (beregnet)</div>
+            <div class="card-value" id="stat-tax">—</div>
+            <div class="card-sub">denne måneden</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Antall salg</div>
+            <div class="card-value" id="stat-sales">—</div>
+            <div class="card-sub">denne måneden</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Produkter på lager</div>
+            <div class="card-value" id="stat-products">—</div>
+            <div class="card-sub">totalt registrert</div>
+          </div>
+        </div>
+
+        <div class="page-header" style="margin-top: 8px;">
+          <div class="page-title" style="font-size: 16px;">Produktoversikt</div>
+        </div>
+
+        <div class="sort-controls">
+          <label>Sorter etter:</label>
+          <select id="dashboard-sort" onchange="renderDashboardTable()">
+            <option value="volume">Volum (flasker igjen)</option>
+            <option value="producer">Produsent (A–Å)</option>
+            <option value="name">Produktnavn (A–Å)</option>
+          </select>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Produkt</th>
+                <th>Produsent</th>
+                <th>Type</th>
+                <th>Alkohol%</th>
+                <th>Igjen (flasker)</th>
+                <th>Totalt inn</th>
+                <th>Beholdning%</th>
+              </tr>
+            </thead>
+            <tbody id="dashboard-table-body">
+              <tr><td colspan="8"><div class="empty-state"><div class="spinner"></div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ===================== LAGER INN ===================== -->
+      <div class="page" id="page-stock-in">
+        <div class="page-header">
+          <div class="page-title">Mottak fra produsent</div>
+          <div class="page-subtitle">Registrer innkommende varer på lager</div>
+        </div>
+
+        <div class="form-panel">
+          <div class="form-panel-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            Nytt mottak
+          </div>
+          <div class="form-grid">
+            <div>
+              <label>Produkt</label>
+              <select id="si-product">
+                <option value="">Velg produkt…</option>
+              </select>
+            </div>
+            <div>
+              <label>Antall flasker</label>
+              <input type="number" id="si-bottles" placeholder="0" min="1"/>
+            </div>
+            <div>
+              <label>Innkjøpspris per flaske (kr)</label>
+              <input type="number" id="si-price" placeholder="0.00" min="0" step="0.01"/>
+            </div>
+            <div>
+              <label>Dato</label>
+              <input type="date" id="si-date"/>
+            </div>
+            <div class="form-grid-full">
+              <label>Notater (valgfritt)</label>
+              <input type="text" id="si-notes" placeholder="Eventuelle kommentarer…"/>
+            </div>
+          </div>
+          <button class="btn-submit" id="si-submit-btn" onclick="submitStockIn()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Registrer mottak
+          </button>
+        </div>
+
+        <div class="page-header" style="margin-top: 4px;">
+          <div class="page-title" style="font-size: 16px;">Historikk — Mottak</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Dato</th>
+                <th>Produkt</th>
+                <th>Produsent</th>
+                <th>Flasker</th>
+                <th>Pris/flaske</th>
+                <th>Total innkjøp</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="si-table-body">
+              <tr><td colspan="7"><div class="empty-state"><div class="spinner"></div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ===================== LAGER UT ===================== -->
+      <div class="page" id="page-stock-out">
+        <div class="page-header">
+          <div class="page-title">Salg til kunde</div>
+          <div class="page-subtitle">Registrer utgående salg — særavgift beregnes automatisk</div>
+        </div>
+
+        <div class="form-panel">
+          <div class="form-panel-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+            Nytt salg
+          </div>
+          <div class="form-grid">
+            <div>
+              <label>Kunde</label>
+              <select id="so-customer">
+                <option value="">Velg kunde…</option>
+              </select>
+            </div>
+            <div>
+              <label>Produkt</label>
+              <select id="so-product" onchange="updateSalePreview()">
+                <option value="">Velg produkt…</option>
+              </select>
+            </div>
+            <div>
+              <label>Antall flasker</label>
+              <input type="number" id="so-bottles" placeholder="0" min="1" oninput="updateSalePreview()"/>
+            </div>
+            <div>
+              <label>Dato</label>
+              <input type="date" id="so-date"/>
+            </div>
+            <div class="form-grid-full">
+              <label>Notater (valgfritt)</label>
+              <input type="text" id="so-notes" placeholder="Eventuelle kommentarer…"/>
+            </div>
+          </div>
+          <div id="sale-preview" style="display:none; margin-top:14px; background:var(--bg-hover); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px 16px; font-size:13px; color:var(--text-secondary);">
+            <strong style="color:var(--text-primary);">Beregnet særavgift:</strong>
+            <span id="sale-preview-tax" style="color:var(--accent-blue); font-weight:700; font-size:15px; margin-left: 8px;"></span>
+          </div>
+          <button class="btn-submit" id="so-submit-btn" onclick="submitStockOut()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Registrer salg
+          </button>
+        </div>
+
+        <div class="page-header" style="margin-top: 4px;">
+          <div class="page-title" style="font-size: 16px;">Historikk — Salg</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Dato</th>
+                <th>Produkt</th>
+                <th>Kunde</th>
+                <th>Type</th>
+                <th>Flasker</th>
+                <th>Alkohol%</th>
+                <th>Særavgift</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="so-table-body">
+              <tr><td colspan="8"><div class="empty-state"><div class="spinner"></div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ===================== LAGERSTATUS ===================== -->
+      <div class="page" id="page-inventory">
+        <div class="page-header">
+          <div class="page-title">Lagerstatus</div>
+          <div class="page-subtitle">Totalt inn minus totalt ut per produkt</div>
+        </div>
+        <div class="sort-controls">
+          <label>Sorter etter:</label>
+          <select id="inventory-sort" onchange="renderInventoryTable()">
+            <option value="remaining">Flasker igjen</option>
+            <option value="producer">Produsent</option>
+            <option value="name">Produktnavn</option>
+            <option value="type">Type</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Produkt</th>
+                <th>Produsent</th>
+                <th>Type</th>
+                <th>Alkohol%</th>
+                <th>Totalt inn</th>
+                <th>Totalt ut</th>
+                <th>Igjen (flasker)</th>
+                <th>Beholdning%</th>
+              </tr>
+            </thead>
+            <tbody id="inventory-table-body">
+              <tr><td colspan="9"><div class="empty-state"><div class="spinner"></div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ===================== PRODUKTER ===================== -->
+      <div class="page" id="page-products">
+        <div class="page-header">
+          <div class="page-title">Produkter</div>
+          <div class="page-subtitle">Administrer produktregisteret</div>
+        </div>
+
+        <div class="form-panel">
+          <div class="form-panel-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            Nytt produkt
+          </div>
+          <div class="form-grid">
+            <div>
+              <label>Produktnavn</label>
+              <input type="text" id="p-name" placeholder="f.eks. Chablis Premier Cru"/>
+            </div>
+            <div>
+              <label>Produsent</label>
+              <input type="text" id="p-producer" placeholder="f.eks. Domaine Dupont"/>
+            </div>
+            <div>
+              <label>Type</label>
+              <select id="p-type">
+                <option value="vin">Vin</option>
+                <option value="brennevin">Brennevin</option>
+              </select>
+            </div>
+            <div>
+              <label>Alkohol% (vol)</label>
+              <input type="number" id="p-alcohol" placeholder="13.5" min="0.1" max="100" step="0.1"/>
+            </div>
+          </div>
+          <button class="btn-submit" id="p-submit-btn" onclick="submitProduct()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Legg til produkt
+          </button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Produktnavn</th>
+                <th>Produsent</th>
+                <th>Type</th>
+                <th>Alkohol%</th>
+                <th>Avgiftssats (per liter)</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="products-table-body">
+              <tr><td colspan="6"><div class="empty-state"><div class="spinner"></div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ===================== KUNDER ===================== -->
+      <div class="page" id="page-customers">
+        <div class="page-header">
+          <div class="page-title">Kunder</div>
+          <div class="page-subtitle">Administrer kundeliste</div>
+        </div>
+
+        <div class="form-panel">
+          <div class="form-panel-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+            Ny kunde
+          </div>
+          <div class="form-grid">
+            <div>
+              <label>Bedriftsnavn / Bar</label>
+              <input type="text" id="c-name" placeholder="f.eks. Bar Terminus"/>
+            </div>
+            <div>
+              <label>Kontaktperson</label>
+              <input type="text" id="c-contact" placeholder="Ola Nordmann"/>
+            </div>
+            <div>
+              <label>Telefon</label>
+              <input type="tel" id="c-phone" placeholder="+47 400 00 000"/>
+            </div>
+            <div>
+              <label>E-post</label>
+              <input type="email" id="c-email" placeholder="ola@bar.no"/>
+            </div>
+          </div>
+          <button class="btn-submit" id="c-submit-btn" onclick="submitCustomer()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Legg til kunde
+          </button>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Navn</th>
+                <th>Kontaktperson</th>
+                <th>Telefon</th>
+                <th>E-post</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="customers-table-body">
+              <tr><td colspan="5"><div class="empty-state"><div class="spinner"></div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ===================== RAPPORT ===================== -->
+      <div class="page" id="page-report">
+        <div class="page-header">
+          <div class="page-title">Månedlig rapport</div>
+          <div class="page-subtitle">Alle salg, avgifter og summer for valgt måned</div>
+        </div>
+
+        <div class="report-controls">
+          <div>
+            <label style="margin-bottom:4px;">Måned</label>
+            <input type="month" id="report-month"/>
+          </div>
+          <div style="display:flex; align-items:flex-end; gap:10px; padding-bottom:1px;">
+            <button class="btn-submit" onclick="loadReport()">Vis rapport</button>
+            <button class="btn-export" id="report-export-btn" onclick="exportCSV()" style="display:none;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Eksporter CSV
+            </button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Dato</th>
+                <th>Produkt</th>
+                <th>Produsent</th>
+                <th>Type</th>
+                <th>Kunde</th>
+                <th>Flasker</th>
+                <th>Alkohol%</th>
+                <th>Avgiftssats</th>
+                <th>Særavgift</th>
+              </tr>
+            </thead>
+            <tbody id="report-table-body">
+              <tr><td colspan="9">
+                <div class="empty-state">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                  <p>Velg en måned og trykk «Vis rapport»</p>
+                </div>
+              </td></tr>
+            </tbody>
+            <tfoot id="report-tfoot" style="display:none;">
+              <tr style="background:var(--bg-surface); font-weight:700;">
+                <td colspan="5" style="padding:12px 14px; color:var(--text-secondary);">Totalt</td>
+                <td id="report-total-bottles" style="padding:12px 14px;"></td>
+                <td colspan="2" style="padding:12px 14px;"></td>
+                <td id="report-total-tax" style="padding:12px 14px; color:var(--accent-blue);"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+    </main><!-- /main -->
+  </div><!-- /layout -->
+
+  <footer class="attribution">
+    <a href="https://www.perplexity.ai/computer" target="_blank" rel="noopener noreferrer">Bygget med Perplexity Computer</a>
+  </footer>
+</div><!-- /app-page -->
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- ======================================================
+     JAVASCRIPT
+     ====================================================== -->
+<script>
+// ============================================================
+// KONFIGURASJON — LIMES INN HER
+// ============================================================
+const SUPABASE_URL  = 'https://ticzpicrsrwamlksflxy.supabase.co';
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpY3pwaWNyc3J3YW1sa3NmbHh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMjUzNDUsImV4cCI6MjA4ODkwMTM0NX0.war-nVG8OQDg5IRoEfxJndDrrNFS_WYR5dclfLbn0KQ';
+
+// ============================================================
+// AVGIFTSSATSER 2026
+// ============================================================
+const TAX_RATES = {
+  brennevin: 9.23,  // kr per vol% per liter
+  vin:       5.41   // kr per vol% per liter
+};
+const BOTTLE_LITERS = 0.75;
+
+function calcTax(type, alcoholPct, bottles) {
+  const rate   = TAX_RATES[type] || 0;
+  const liters = bottles * BOTTLE_LITERS;
+  return rate * alcoholPct * liters;
+}
+
+// ============================================================
+// SUPABASE CLIENT
+// ============================================================
+const { createClient } = supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// In-memory cache for drop-downs
+let cacheProducts  = [];
+let cacheCustomers = [];
+let cacheStockIn   = [];
+let cacheStockOut  = [];
+
+// ============================================================
+// AUTH
+// ============================================================
+async function handleLogin() {
+  const email    = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const btn      = document.getElementById('login-btn');
+  const errEl    = document.getElementById('login-error');
+  errEl.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Logger inn…';
+
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) {
+    errEl.textContent = 'Feil e-post eller passord. Prøv igjen.';
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Logg inn';
+  }
+}
+
+async function handleLogout() {
+  await sb.auth.signOut();
+}
+
+sb.auth.onAuthStateChange((event, session) => {
+  if (session) {
+    document.getElementById('login-page').style.display  = 'none';
+    document.getElementById('app-page').style.display    = 'block';
+    document.getElementById('topbar-email').textContent  = session.user.email;
+    initApp();
+  } else {
+    document.getElementById('login-page').style.display  = 'flex';
+    document.getElementById('app-page').style.display    = 'none';
+    const btn = document.getElementById('login-btn');
+    btn.disabled = false;
+    btn.textContent = 'Logg inn';
+  }
+});
+
+// ============================================================
+// NAVIGATION
+// ============================================================
+function navigate(page) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.querySelector(`.nav-item[data-page="${page}"]`).classList.add('active');
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+  document.getElementById(`page-${page}`).classList.add('active');
+  loadPage(page);
+}
+
+async function loadPage(page) {
+  if (page === 'dashboard')  await loadDashboard();
+  if (page === 'stock-in')   await loadStockIn();
+  if (page === 'stock-out')  await loadStockOut();
+  if (page === 'inventory')  await loadInventory();
+  if (page === 'products')   await loadProducts();
+  if (page === 'customers')  await loadCustomers();
+}
+
+async function initApp() {
+  setDefaultDates();
+  await Promise.all([fetchProducts(), fetchCustomers()]);
+  await loadDashboard();
+}
+
+// ============================================================
+// DEFAULTS
+// ============================================================
+function setDefaultDates() {
+  const today = new Date().toISOString().split('T')[0];
+  ['si-date', 'so-date'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = today;
+  });
+  const now = new Date();
+  const m = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const rm = document.getElementById('report-month');
+  if (rm) rm.value = m;
+}
+
+// ============================================================
+// FETCH DATA
+// ============================================================
+async function fetchProducts() {
+  const { data } = await sb.from('products').select('*').order('name');
+  cacheProducts = data || [];
+  populateProductDropdowns();
+}
+
+async function fetchCustomers() {
+  const { data } = await sb.from('customers').select('*').order('name');
+  cacheCustomers = data || [];
+  populateCustomerDropdowns();
+}
+
+async function fetchStockIn() {
+  const { data } = await sb.from('stock_in')
+    .select('*, product:products(name, producer, type, alcohol_pct)')
+    .order('received_date', { ascending: false });
+  cacheStockIn = data || [];
+}
+
+async function fetchStockOut() {
+  const { data } = await sb.from('stock_out')
+    .select('*, product:products(name, producer, type, alcohol_pct), customer:customers(name)')
+    .order('sale_date', { ascending: false });
+  cacheStockOut = data || [];
+}
+
+// ============================================================
+// DROPDOWNS
+// ============================================================
+function populateProductDropdowns() {
+  ['si-product', 'so-product'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">Velg produkt…</option>';
+    cacheProducts.forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = `${p.name} — ${p.producer} (${p.alcohol_pct}%)`;
+      sel.appendChild(o);
+    });
+    sel.value = cur;
+  });
+}
+
+function populateCustomerDropdowns() {
+  const sel = document.getElementById('so-customer');
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Velg kunde…</option>';
+  cacheCustomers.forEach(c => {
+    const o = document.createElement('option');
+    o.value = c.id;
+    o.textContent = c.name;
+    sel.appendChild(o);
+  });
+  sel.value = cur;
+}
+
+// ============================================================
+// INVENTORY HELPERS
+// ============================================================
+function buildInventoryMap() {
+  const map = {};
+  cacheProducts.forEach(p => {
+    map[p.id] = { ...p, totalIn: 0, totalOut: 0 };
+  });
+  cacheStockIn.forEach(s => {
+    if (map[s.product_id]) map[s.product_id].totalIn += s.bottles;
+  });
+  cacheStockOut.forEach(s => {
+    if (map[s.product_id]) map[s.product_id].totalOut += s.bottles;
+  });
+  return Object.values(map);
+}
+
+function stockStatus(remaining, totalIn) {
+  if (totalIn === 0) return 'green';
+  const pct = remaining / totalIn;
+  if (pct < 0.2) return 'red';
+  if (pct < 0.5) return 'yellow';
+  return 'green';
+}
+
+// ============================================================
+// DASHBOARD
+// ============================================================
+async function loadDashboard() {
+  await Promise.all([fetchProducts(), fetchCustomers(), fetchStockIn(), fetchStockOut()]);
+  const now   = new Date();
+  const month = now.getMonth();
+  const year  = now.getFullYear();
+  const label = now.toLocaleString('no-NO', { month: 'long', year: 'numeric' });
+  document.getElementById('dashboard-month-label').textContent = `Statistikk for ${label}`;
+
+  const thisMo = cacheStockOut.filter(s => {
+    const d = new Date(s.sale_date);
+    return d.getMonth() === month && d.getFullYear() === year;
+  });
+
+  let totalBottles = 0, totalTax = 0;
+  thisMo.forEach(s => {
+    totalBottles += s.bottles;
+    const p = cacheProducts.find(x => x.id === s.product_id);
+    if (p) totalTax += calcTax(p.type, p.alcohol_pct, s.bottles);
+  });
+
+  document.getElementById('stat-bottles').textContent = totalBottles.toLocaleString('no-NO');
+  document.getElementById('stat-tax').textContent     = formatKr(totalTax);
+  document.getElementById('stat-sales').textContent   = thisMo.length.toLocaleString('no-NO');
+  document.getElementById('stat-products').textContent = cacheProducts.length.toLocaleString('no-NO');
+
+  renderDashboardTable();
+}
+
+function renderDashboardTable() {
+  const sort = document.getElementById('dashboard-sort')?.value || 'volume';
+  const items = buildInventoryMap();
+
+  items.sort((a, b) => {
+    const remA = a.totalIn - a.totalOut;
+    const remB = b.totalIn - b.totalOut;
+    if (sort === 'volume')   return remB - remA;
+    if (sort === 'producer') return a.producer.localeCompare(b.producer, 'no');
+    if (sort === 'name')     return a.name.localeCompare(b.name, 'no');
+    return 0;
+  });
+
+  const tbody = document.getElementById('dashboard-table-body');
+  if (!items.length) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg><p>Ingen produkter registrert ennå.</p></div></td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = items.map(p => {
+    const remaining = p.totalIn - p.totalOut;
+    const pct = p.totalIn > 0 ? Math.round((remaining / p.totalIn) * 100) : 0;
+    const status = stockStatus(remaining, p.totalIn);
+    return `<tr>
+      <td><span class="status-dot ${status}" title="${pctLabel(status)}"></span></td>
+      <td style="font-weight:600;">${esc(p.name)}</td>
+      <td>${esc(p.producer)}</td>
+      <td><span class="badge ${p.type}">${p.type === 'brennevin' ? 'Brennevin' : 'Vin'}</span></td>
+      <td>${p.alcohol_pct}%</td>
+      <td style="font-weight:700; color:${remaining <= 0 ? 'var(--accent-red)' : 'var(--text-primary)'};">${remaining}</td>
+      <td>${p.totalIn}</td>
+      <td>${pct}%</td>
+    </tr>`;
+  }).join('');
+}
+
+// ============================================================
+// STOCK IN
+// ============================================================
+async function loadStockIn() {
+  await fetchStockIn();
+  renderStockInTable();
+}
+
+function renderStockInTable() {
+  const tbody = document.getElementById('si-table-body');
+  if (!cacheStockIn.length) {
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><p>Ingen mottak registrert ennå.</p></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = cacheStockIn.map(s => {
+    const total = s.bottles * s.purchase_price_per_bottle;
+    return `<tr>
+      <td>${fmtDate(s.received_date)}</td>
+      <td style="font-weight:600;">${esc(s.product?.name || '—')}</td>
+      <td>${esc(s.product?.producer || '—')}</td>
+      <td>${s.bottles} fl.</td>
+      <td>${formatKr(s.purchase_price_per_bottle)}</td>
+      <td>${formatKr(total)}</td>
+      <td><button class="btn-danger" onclick="deleteStockIn('${s.id}')">Slett</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function submitStockIn() {
+  const productId = document.getElementById('si-product').value;
+  const bottles   = parseInt(document.getElementById('si-bottles').value);
+  const price     = parseFloat(document.getElementById('si-price').value);
+  const date      = document.getElementById('si-date').value;
+  const notes     = document.getElementById('si-notes').value.trim();
+
+  if (!productId || !bottles || !price || !date) { toast('Fyll ut alle obligatoriske felt.', 'error'); return; }
+
+  const { data: { user } } = await sb.auth.getUser();
+  const btn = document.getElementById('si-submit-btn');
+  btn.disabled = true;
+
+  const { error } = await sb.from('stock_in').insert({
+    user_id: user.id,
+    product_id: productId,
+    bottles,
+    purchase_price_per_bottle: price,
+    received_date: date,
+    notes: notes || null
+  });
+
+  btn.disabled = false;
+  if (error) { toast('Feil ved lagring: ' + error.message, 'error'); return; }
+  toast('Mottak registrert!', 'success');
+  document.getElementById('si-bottles').value = '';
+  document.getElementById('si-price').value   = '';
+  document.getElementById('si-notes').value   = '';
+  await loadStockIn();
+}
+
+async function deleteStockIn(id) {
+  if (!confirm('Slette dette mottaket?')) return;
+  await sb.from('stock_in').delete().eq('id', id);
+  toast('Mottaket ble slettet.', 'success');
+  await loadStockIn();
+}
+
+// ============================================================
+// STOCK OUT
+// ============================================================
+async function loadStockOut() {
+  await fetchStockOut();
+  renderStockOutTable();
+}
+
+function updateSalePreview() {
+  const productId = document.getElementById('so-product').value;
+  const bottles   = parseInt(document.getElementById('so-bottles').value) || 0;
+  const prev      = document.getElementById('sale-preview');
+  const prevTax   = document.getElementById('sale-preview-tax');
+  if (!productId || bottles < 1) { prev.style.display = 'none'; return; }
+  const p = cacheProducts.find(x => x.id === productId);
+  if (!p) { prev.style.display = 'none'; return; }
+  const tax = calcTax(p.type, p.alcohol_pct, bottles);
+  prevTax.textContent = formatKr(tax);
+  prev.style.display  = 'block';
+}
+
+function renderStockOutTable() {
+  const tbody = document.getElementById('so-table-body');
+  if (!cacheStockOut.length) {
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><p>Ingen salg registrert ennå.</p></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = cacheStockOut.map(s => {
+    const p   = s.product;
+    const tax = p ? calcTax(p.type, p.alcohol_pct, s.bottles) : 0;
+    const rate = p ? TAX_RATES[p.type] : 0;
+    return `<tr>
+      <td>${fmtDate(s.sale_date)}</td>
+      <td style="font-weight:600;">${esc(p?.name || '—')}</td>
+      <td>${esc(s.customer?.name || '—')}</td>
+      <td>${p ? `<span class="badge ${p.type}">${p.type === 'brennevin' ? 'Brennevin' : 'Vin'}</span>` : '—'}</td>
+      <td>${s.bottles} fl.</td>
+      <td>${p?.alcohol_pct || '—'}%</td>
+      <td style="color:var(--accent-blue); font-weight:600;">${formatKr(tax)}</td>
+      <td><button class="btn-danger" onclick="deleteStockOut('${s.id}')">Slett</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function submitStockOut() {
+  const customerId = document.getElementById('so-customer').value;
+  const productId  = document.getElementById('so-product').value;
+  const bottles    = parseInt(document.getElementById('so-bottles').value);
+  const date       = document.getElementById('so-date').value;
+  const notes      = document.getElementById('so-notes').value.trim();
+
+  if (!productId || !bottles || !date) { toast('Fyll ut alle obligatoriske felt.', 'error'); return; }
+
+  const { data: { user } } = await sb.auth.getUser();
+  const btn = document.getElementById('so-submit-btn');
+  btn.disabled = true;
+
+  const { error } = await sb.from('stock_out').insert({
+    user_id: user.id,
+    product_id: productId,
+    customer_id: customerId || null,
+    bottles,
+    sale_date: date,
+    notes: notes || null
+  });
+
+  btn.disabled = false;
+  if (error) { toast('Feil ved lagring: ' + error.message, 'error'); return; }
+
+  const p = cacheProducts.find(x => x.id === productId);
+  const tax = p ? calcTax(p.type, p.alcohol_pct, bottles) : 0;
+  toast(`Salg registrert! Særavgift: ${formatKr(tax)}`, 'success');
+
+  document.getElementById('so-bottles').value = '';
+  document.getElementById('so-notes').value   = '';
+  document.getElementById('sale-preview').style.display = 'none';
+  await loadStockOut();
+}
+
+async function deleteStockOut(id) {
+  if (!confirm('Slette dette salget?')) return;
+  await sb.from('stock_out').delete().eq('id', id);
+  toast('Salget ble slettet.', 'success');
+  await loadStockOut();
+}
+
+// ============================================================
+// INVENTORY
+// ============================================================
+async function loadInventory() {
+  await Promise.all([fetchProducts(), fetchStockIn(), fetchStockOut()]);
+  renderInventoryTable();
+}
+
+function renderInventoryTable() {
+  const sort  = document.getElementById('inventory-sort')?.value || 'remaining';
+  const items = buildInventoryMap();
+
+  items.sort((a, b) => {
+    const remA = a.totalIn - a.totalOut;
+    const remB = b.totalIn - b.totalOut;
+    if (sort === 'remaining') return remB - remA;
+    if (sort === 'producer')  return a.producer.localeCompare(b.producer, 'no');
+    if (sort === 'name')      return a.name.localeCompare(b.name, 'no');
+    if (sort === 'type')      return a.type.localeCompare(b.type);
+    return 0;
+  });
+
+  const tbody = document.getElementById('inventory-table-body');
+  if (!items.length) {
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><p>Ingen produkter registrert.</p></div></td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = items.map(p => {
+    const remaining = p.totalIn - p.totalOut;
+    const pct = p.totalIn > 0 ? Math.round((remaining / p.totalIn) * 100) : 0;
+    const status = stockStatus(remaining, p.totalIn);
+    return `<tr>
+      <td><span class="status-dot ${status}" title="${pctLabel(status)}"></span></td>
+      <td style="font-weight:600;">${esc(p.name)}</td>
+      <td>${esc(p.producer)}</td>
+      <td><span class="badge ${p.type}">${p.type === 'brennevin' ? 'Brennevin' : 'Vin'}</span></td>
+      <td>${p.alcohol_pct}%</td>
+      <td>${p.totalIn}</td>
+      <td>${p.totalOut}</td>
+      <td style="font-weight:700; color:${remaining <= 0 ? 'var(--accent-red)' : 'var(--text-primary)'};">${remaining}</td>
+      <td>${pct}%</td>
+    </tr>`;
+  }).join('');
+}
+
+// ============================================================
+// PRODUCTS
+// ============================================================
+async function loadProducts() {
+  await fetchProducts();
+  renderProductsTable();
+}
+
+function renderProductsTable() {
+  const tbody = document.getElementById('products-table-body');
+  if (!cacheProducts.length) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><p>Ingen produkter registrert.</p></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = cacheProducts.map(p => {
+    const rate = TAX_RATES[p.type];
+    return `<tr>
+      <td style="font-weight:600;">${esc(p.name)}</td>
+      <td>${esc(p.producer)}</td>
+      <td><span class="badge ${p.type}">${p.type === 'brennevin' ? 'Brennevin' : 'Vin'}</span></td>
+      <td>${p.alcohol_pct}%</td>
+      <td>${rate} kr/vol%/l</td>
+      <td><button class="btn-danger" onclick="deleteProduct('${p.id}')">Slett</button></td>
+    </tr>`;
+  }).join('');
+}
+
+async function submitProduct() {
+  const name     = document.getElementById('p-name').value.trim();
+  const producer = document.getElementById('p-producer').value.trim();
+  const type     = document.getElementById('p-type').value;
+  const alcohol  = parseFloat(document.getElementById('p-alcohol').value);
+
+  if (!name || !producer || !type || !alcohol) { toast('Fyll ut alle felt.', 'error'); return; }
+
+  const { data: { user } } = await sb.auth.getUser();
+  const btn = document.getElementById('p-submit-btn');
+  btn.disabled = true;
+
+  const { error } = await sb.from('products').insert({
+    user_id: user.id,
+    name,
+    producer,
+    type,
+    alcohol_pct: alcohol
+  });
+
+  btn.disabled = false;
+  if (error) { toast('Feil: ' + error.message, 'error'); return; }
+  toast('Produkt lagt til!', 'success');
+  document.getElementById('p-name').value     = '';
+  document.getElementById('p-producer').value = '';
+  document.getElementById('p-alcohol').value  = '';
+  await loadProducts();
+}
+
+async function deleteProduct(id) {
+  if (!confirm('Slette dette produktet? Alle tilknyttede lager- og salgsdata beholdes.')) return;
+  await sb.from('products').delete().eq('id', id);
+  toast('Produkt slettet.', 'success');
+  await loadProducts();
+}
+
+// ============================================================
+// CUSTOMERS
+// ============================================================
+async function loadCustomers() {
+  await fetchCustomers();
+  renderCustomersTable();
+}
+
+function renderCustomersTable() {
+  const tbody = document.getElementById('customers-table-body');
+  if (!cacheCustomers.length) {
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><p>Ingen kunder registrert.</p></div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = cacheCustomers.map(c => `<tr>
+    <td style="font-weight:600;">${esc(c.name)}</td>
+    <td>${esc(c.contact_person || '—')}</td>
+    <td>${esc(c.phone || '—')}</td>
+    <td>${esc(c.email || '—')}</td>
+    <td><button class="btn-danger" onclick="deleteCustomer('${c.id}')">Slett</button></td>
+  </tr>`).join('');
+}
+
+async function submitCustomer() {
+  const name    = document.getElementById('c-name').value.trim();
+  const contact = document.getElementById('c-contact').value.trim();
+  const phone   = document.getElementById('c-phone').value.trim();
+  const email   = document.getElementById('c-email').value.trim();
+
+  if (!name) { toast('Bedriftsnavn er påkrevd.', 'error'); return; }
+
+  const { data: { user } } = await sb.auth.getUser();
+  const btn = document.getElementById('c-submit-btn');
+  btn.disabled = true;
+
+  const { error } = await sb.from('customers').insert({
+    user_id: user.id,
+    name,
+    contact_person: contact || null,
+    phone: phone || null,
+    email: email || null
+  });
+
+  btn.disabled = false;
+  if (error) { toast('Feil: ' + error.message, 'error'); return; }
+  toast('Kunde lagt til!', 'success');
+  document.getElementById('c-name').value    = '';
+  document.getElementById('c-contact').value = '';
+  document.getElementById('c-phone').value   = '';
+  document.getElementById('c-email').value   = '';
+  await loadCustomers();
+}
+
+async function deleteCustomer(id) {
+  if (!confirm('Slette denne kunden?')) return;
+  await sb.from('customers').delete().eq('id', id);
+  toast('Kunde slettet.', 'success');
+  await loadCustomers();
+}
+
+// ============================================================
+// RAPPORT
+// ============================================================
+let reportData = [];
+
+async function loadReport() {
+  const monthVal = document.getElementById('report-month').value;
+  if (!monthVal) { toast('Velg en måned.', 'error'); return; }
+
+  const [year, month] = monthVal.split('-');
+  const from = `${year}-${month}-01`;
+  const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+  const to   = `${year}-${month}-${String(lastDay).padStart(2,'0')}`;
+
+  const { data, error } = await sb.from('stock_out')
+    .select('*, product:products(name, producer, type, alcohol_pct), customer:customers(name)')
+    .gte('sale_date', from)
+    .lte('sale_date', to)
+    .order('sale_date');
+
+  if (error) { toast('Feil ved henting: ' + error.message, 'error'); return; }
+  reportData = data || [];
+
+  const tbody = document.getElementById('report-table-body');
+  const tfoot = document.getElementById('report-tfoot');
+  const expBtn = document.getElementById('report-export-btn');
+
+  if (!reportData.length) {
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><p>Ingen salg i valgt måned.</p></div></td></tr>`;
+    tfoot.style.display = 'none';
+    expBtn.style.display = 'none';
+    return;
+  }
+
+  let totalBottles = 0, totalTax = 0;
+  tbody.innerHTML = reportData.map(s => {
+    const p    = s.product;
+    const tax  = p ? calcTax(p.type, p.alcohol_pct, s.bottles) : 0;
+    const rate = p ? TAX_RATES[p.type] : 0;
+    totalBottles += s.bottles;
+    totalTax     += tax;
+    return `<tr>
+      <td>${fmtDate(s.sale_date)}</td>
+      <td style="font-weight:600;">${esc(p?.name || '—')}</td>
+      <td>${esc(p?.producer || '—')}</td>
+      <td>${p ? `<span class="badge ${p.type}">${p.type === 'brennevin' ? 'Brennevin' : 'Vin'}</span>` : '—'}</td>
+      <td>${esc(s.customer?.name || '—')}</td>
+      <td>${s.bottles}</td>
+      <td>${p?.alcohol_pct || '—'}%</td>
+      <td>${rate} kr/vol%/l</td>
+      <td style="color:var(--accent-blue); font-weight:600;">${formatKr(tax)}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('report-total-bottles').textContent = `${totalBottles} fl.`;
+  document.getElementById('report-total-tax').textContent = formatKr(totalTax);
+  tfoot.style.display = '';
+  expBtn.style.display = 'inline-flex';
+}
+
+function exportCSV() {
+  if (!reportData.length) return;
+  const monthVal = document.getElementById('report-month').value || 'rapport';
+
+  const headers = ['Dato','Produkt','Produsent','Type','Kunde','Flasker','Alkohol%','Avgiftssats (kr/vol%/l)','Særavgift (kr)'];
+  const rows = reportData.map(s => {
+    const p    = s.product;
+    const tax  = p ? calcTax(p.type, p.alcohol_pct, s.bottles) : 0;
+    const rate = p ? TAX_RATES[p.type] : 0;
+    return [
+      s.sale_date,
+      p?.name || '',
+      p?.producer || '',
+      p?.type || '',
+      s.customer?.name || '',
+      s.bottles,
+      p?.alcohol_pct || '',
+      rate,
+      tax.toFixed(2)
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(';');
+  });
+
+  const totalTax = reportData.reduce((acc, s) => {
+    const p = s.product;
+    return acc + (p ? calcTax(p.type, p.alcohol_pct, s.bottles) : 0);
+  }, 0);
+  const totalBottles = reportData.reduce((acc, s) => acc + s.bottles, 0);
+  rows.push(`"TOTALT";"";"";"";"";"${totalBottles}";"";"";${totalTax.toFixed(2).replace('.', ',')}`);
+
+  const csv  = '\uFEFF' + [headers.join(';'), ...rows].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `vinimport-rapport-${monthVal}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('CSV eksportert!', 'success');
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+function formatKr(amount) {
+  return new Intl.NumberFormat('no-NO', { style: 'currency', currency: 'NOK', minimumFractionDigits: 2 }).format(amount);
+}
+
+function fmtDate(dateStr) {
+  if (!dateStr) return '—';
+  const [y, m, d] = dateStr.split('-');
+  return `${d}.${m}.${y}`;
+}
+
+function esc(str) {
+  if (!str) return '';
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function pctLabel(status) {
+  if (status === 'red')    return 'Under 20% beholdning';
+  if (status === 'yellow') return '20–50% beholdning';
+  return 'Over 50% beholdning';
+}
+
+function toast(msg, type = 'success') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  const icon = type === 'success'
+    ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-green)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
+    : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent-red)" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
+  el.innerHTML = icon + esc(msg);
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// ============================================================
+// KEYBOARD: Enter in login form
+// ============================================================
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && document.getElementById('login-page').style.display !== 'none') {
+    handleLogin();
+  }
+});
+</script>
+
+</body>
+</html>
