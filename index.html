@@ -872,6 +872,7 @@
                 <th>Produsent</th>
                 <th>Flasker</th>
                 <th>Pris/flaske</th>
+                <th>Pris pr. fl. + avgift</th>
                 <th>Total innkjøp</th>
                 <th></th>
               </tr>
@@ -1530,17 +1531,21 @@ async function loadStockIn() {
 function renderStockInTable() {
   const tbody = document.getElementById('si-table-body');
   if (!cacheStockIn.length) {
-    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><p>Ingen mottak registrert ennå.</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><p>Ingen mottak registrert ennå.</p></div></td></tr>`;
     return;
   }
   tbody.innerHTML = cacheStockIn.map(s => {
-    const total = s.bottles * s.purchase_price_per_bottle;
+    const total        = s.bottles * s.purchase_price_per_bottle;
+    const p            = s.product;
+    const taxPerBottle = p ? calcTax(p.type, p.alcohol_pct, 1) : 0;
+    const priceWithTax = s.purchase_price_per_bottle + taxPerBottle;
     return `<tr>
       <td>${fmtDate(s.received_date)}</td>
-      <td style="font-weight:600;">${esc(s.product?.name || '—')}</td>
-      <td>${esc(s.product?.producer || '—')}</td>
+      <td style="font-weight:600;">${esc(p?.name || '—')}</td>
+      <td>${esc(p?.producer || '—')}</td>
       <td>${s.bottles} fl.</td>
       <td>${formatKr(s.purchase_price_per_bottle)}</td>
+      <td style="color:var(--accent-blue); font-weight:600;">${formatKr(priceWithTax)}</td>
       <td>${formatKr(total)}</td>
       <td><button class="btn-danger" onclick="deleteStockIn('${s.id}')">Slett</button></td>
     </tr>`;
