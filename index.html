@@ -738,7 +738,7 @@
           <div class="card">
             <div class="card-title">Solgte flasker</div>
             <div class="card-value" id="stat-bottles">—</div>
-            <div class="card-sub">denne måneden</div>
+            <div class="card-sub" id="stat-bottles-liters">denne måneden</div>
           </div>
           <div class="card">
             <div class="card-title">Særavgift (beregnet)</div>
@@ -1473,7 +1473,9 @@ async function loadDashboard() {
     if (p) totalTax += calcTax(p.type, p.alcohol_pct, s.bottles);
   });
 
+  const totalLiters = totalBottles * BOTTLE_LITERS;
   document.getElementById('stat-bottles').textContent = totalBottles.toLocaleString('no-NO');
+  document.getElementById('stat-bottles-liters').textContent = totalLiters.toLocaleString('no-NO', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' liter';
   document.getElementById('stat-tax').textContent     = formatKr(totalTax);
   document.getElementById('stat-sales').textContent   = thisMo.length.toLocaleString('no-NO');
   document.getElementById('stat-products').textContent = cacheProducts.length.toLocaleString('no-NO');
@@ -1885,14 +1887,15 @@ async function loadReport() {
       <td>${esc(p?.producer || '—')}</td>
       <td>${p ? `<span class="badge ${p.type}">${p.type === 'brennevin' ? 'Brennevin' : 'Vin'}</span>` : '—'}</td>
       <td>${esc(s.customer?.name || '—')}</td>
-      <td>${s.bottles}</td>
+      <td>${s.bottles} fl.<br><span style="font-size:11px;color:var(--text-muted);">${(s.bottles * BOTTLE_LITERS).toFixed(2)} l</span></td>
       <td>${p?.alcohol_pct || '—'}%</td>
       <td>${rate} kr/vol%/l</td>
       <td style="color:var(--accent-blue); font-weight:600;">${formatKr(tax)}</td>
     </tr>`;
   }).join('');
 
-  document.getElementById('report-total-bottles').textContent = `${totalBottles} fl.`;
+  const reportTotalLiters = totalBottles * BOTTLE_LITERS;
+  document.getElementById('report-total-bottles').textContent = `${totalBottles} fl. (${reportTotalLiters.toLocaleString('no-NO', {minimumFractionDigits:2, maximumFractionDigits:2})} l)`;
   document.getElementById('report-total-tax').textContent = formatKr(totalTax);
   tfoot.style.display = '';
   expBtn.style.display = 'inline-flex';
