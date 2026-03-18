@@ -11,6 +11,8 @@
 
   <!-- Supabase JS CDN -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- SheetJS for Excel/CSV import -->
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 
   <style>
     /* ====================================================
@@ -526,6 +528,66 @@
     }
     .btn-export:hover { background: rgba(63,185,80,0.2); }
 
+    /* Import drop zone */
+    .import-zone {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius-md);
+      padding: 28px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.15s;
+      background: var(--bg-base);
+      margin-top: 14px;
+    }
+    .import-zone:hover, .import-zone.drag-over {
+      border-color: var(--accent-blue);
+      background: var(--accent-blue-bg);
+    }
+    .import-zone svg { width: 28px; height: 28px; margin: 0 auto 8px; display: block; color: var(--text-muted); }
+    .import-zone p { font-size: 13px; color: var(--text-secondary); margin: 0; }
+    .import-zone span { font-size: 12px; color: var(--text-muted); }
+    .import-preview {
+      margin-top: 14px;
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 12px 16px;
+      font-size: 13px;
+      display: none;
+    }
+    .import-preview-title { font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+    .import-preview-row { color: var(--text-secondary); margin-bottom: 3px; }
+    .import-preview-row.error { color: var(--accent-red); }
+    .import-preview-row.ok { color: var(--accent-green); }
+
+    /* Settings page */
+    .settings-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 24px;
+      margin-bottom: 20px;
+      max-width: 520px;
+    }
+    .settings-card-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .settings-card-title svg { width: 18px; height: 18px; color: var(--accent-blue); }
+    .settings-rate-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .settings-rate-row label { margin-bottom: 0; min-width: 160px; }
+    .settings-rate-row input { max-width: 120px; }
+    .settings-rate-row span { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
     /* ====================================================
        FOOTER ATTRIBUTION
        ==================================================== */
@@ -653,6 +715,13 @@
           Månedlig rapport
         </div>
       </div>
+      <div class="sidebar-section">
+        <div class="sidebar-section-label">System</div>
+        <div class="nav-item" data-page="settings" onclick="navigate('settings')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>
+          Innstillinger
+        </div>
+      </div>
     </nav>
 
     <!-- Main content -->
@@ -737,17 +806,17 @@
           <div class="form-grid">
             <div>
               <label>Produkt</label>
-              <select id="si-product">
+              <select id="si-product" onchange="updateStockInPreview()">
                 <option value="">Velg produkt…</option>
               </select>
             </div>
             <div>
               <label>Antall flasker</label>
-              <input type="number" id="si-bottles" placeholder="0" min="1"/>
+              <input type="number" id="si-bottles" placeholder="0" min="1" oninput="updateStockInPreview()"/>
             </div>
             <div>
               <label>Innkjøpspris per flaske (kr)</label>
-              <input type="number" id="si-price" placeholder="0.00" min="0" step="0.01"/>
+              <input type="number" id="si-price" placeholder="0.00" min="0" step="0.01" oninput="updateStockInPreview()"/>
             </div>
             <div>
               <label>Dato</label>
@@ -758,10 +827,37 @@
               <input type="text" id="si-notes" placeholder="Eventuelle kommentarer…"/>
             </div>
           </div>
+          <div id="si-cost-preview" style="display:none; margin-top:14px; background:var(--bg-hover); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px 16px; font-size:13px; color:var(--text-secondary);">
+            <div style="display:flex; gap:24px; flex-wrap:wrap;">
+              <div>Innkjøpspris: <span id="si-preview-purchase" style="color:var(--text-primary); font-weight:600;"></span></div>
+              <div>Særavgift per flaske: <span id="si-preview-tax" style="color:var(--accent-blue); font-weight:600;"></span></div>
+              <div style="font-weight:700;">Total kost per flaske: <span id="si-preview-total" style="color:var(--accent-green); font-weight:700;"></span></div>
+            </div>
+          </div>
           <button class="btn-submit" id="si-submit-btn" onclick="submitStockIn()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             Registrer mottak
           </button>
+        </div>
+
+        <!-- IMPORT MOTTAK -->
+        <div class="form-panel">
+          <div class="form-panel-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Importer mottak fra Excel / CSV
+          </div>
+          <p style="font-size:13px; color:var(--text-secondary); margin-bottom:10px;">Forventede kolonner (rekkefølge spiller ingen rolle): <strong>Dato, Produkt, Produsent, Type, Alkohol%, Flasker, Innkjøpspris</strong></p>
+          <div class="import-zone" id="si-import-zone" onclick="document.getElementById('si-import-file').click()" ondragover="handleDragOver(event,'si-import-zone')" ondragleave="handleDragLeave('si-import-zone')" ondrop="handleDrop(event,'si')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <p>Trykk for å velge fil, eller dra den hit</p>
+            <span>.xlsx, .xls, .csv</span>
+          </div>
+          <input type="file" id="si-import-file" accept=".xlsx,.xls,.csv" style="display:none" onchange="handleImportFile(event,'si')"/>
+          <div class="import-preview" id="si-import-preview">
+            <div class="import-preview-title" id="si-import-preview-title"></div>
+            <div id="si-import-preview-rows"></div>
+            <button class="btn-submit" id="si-import-btn" style="margin-top:12px;" onclick="confirmImportStockIn()">Importer alle rader</button>
+          </div>
         </div>
 
         <div class="page-header" style="margin-top: 4px;">
@@ -1015,6 +1111,26 @@
           <div class="page-subtitle">Alle salg, avgifter og summer for valgt måned</div>
         </div>
 
+        <!-- IMPORT RAPPORT BACKUP -->
+        <div class="form-panel" style="margin-bottom:24px;">
+          <div class="form-panel-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Gjenopprett fra backup (CSV-rapport)
+          </div>
+          <p style="font-size:13px; color:var(--text-secondary); margin-bottom:10px;">Last opp en tidligere eksportert rapport-CSV for å gjenopprette salgsdata. Systemet kobler automatisk til eksisterende produkter og kunder basert på navn.</p>
+          <div class="import-zone" id="rp-import-zone" onclick="document.getElementById('rp-import-file').click()" ondragover="handleDragOver(event,'rp-import-zone')" ondragleave="handleDragLeave('rp-import-zone')" ondrop="handleDrop(event,'rp')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            <p>Trykk for å velge backup-CSV-fil</p>
+            <span>.csv</span>
+          </div>
+          <input type="file" id="rp-import-file" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleImportFile(event,'rp')"/>
+          <div class="import-preview" id="rp-import-preview">
+            <div class="import-preview-title" id="rp-import-preview-title"></div>
+            <div id="rp-import-preview-rows"></div>
+            <button class="btn-submit" id="rp-import-btn" style="margin-top:12px;" onclick="confirmImportReport()">Gjenopprett salgsdata</button>
+          </div>
+        </div>
+
         <div class="report-controls">
           <div>
             <label style="margin-bottom:4px;">Måned</label>
@@ -1064,6 +1180,51 @@
         </div>
       </div>
 
+      <!-- ===================== INNSTILLINGER ===================== -->
+      <div class="page" id="page-settings">
+        <div class="page-header">
+          <div class="page-title">Innstillinger</div>
+          <div class="page-subtitle">Juster avgiftssatser uten å endre koden</div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            Avgiftssatser 2026
+          </div>
+          <div class="settings-rate-row">
+            <label>Vin (&gt;4,7% alkohol)</label>
+            <input type="number" id="settings-rate-vin" step="0.01" min="0" placeholder="5.41"/>
+            <span>kr/vol%/liter</span>
+          </div>
+          <div class="settings-rate-row">
+            <label>Brennevin (&gt;22% alkohol)</label>
+            <input type="number" id="settings-rate-brennevin" step="0.01" min="0" placeholder="9.23"/>
+            <span>kr/vol%/liter</span>
+          </div>
+          <div style="font-size:12px; color:var(--text-muted); margin-bottom:16px; line-height:1.6;">
+            Avgiften beregnes som: sats &times; alkohol% &times; (flasker &times; 0,75 liter)<br>
+            Endringer gjelder kun nye beregninger. Historiske salg beholdes som de er.
+          </div>
+          <button class="btn-submit" onclick="saveSettings()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Lagre avgiftssatser
+          </button>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+            Generell info
+          </div>
+          <div style="font-size:13px; color:var(--text-secondary); line-height:1.8;">
+            <div>Flaskestørrelse: <strong style="color:var(--text-primary);">0,75 liter</strong></div>
+            <div>Supabase prosjekt: <strong style="color:var(--text-primary);">ticzpicrsrwamlksflxy</strong></div>
+            <div>Portal versjon: <strong style="color:var(--text-primary);">2.0</strong></div>
+          </div>
+        </div>
+      </div>
+
     </main><!-- /main -->
   </div><!-- /layout -->
 
@@ -1080,17 +1241,18 @@
      ====================================================== -->
 <script>
 // ============================================================
-// KONFIGURASJON — LIMES INN HER
+// KONFIGURASJON
 // ============================================================
 const SUPABASE_URL  = 'https://ticzpicrsrwamlksflxy.supabase.co';
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpY3pwaWNyc3J3YW1sa3NmbHh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMzMjUzNDUsImV4cCI6MjA4ODkwMTM0NX0.war-nVG8OQDg5IRoEfxJndDrrNFS_WYR5dclfLbn0KQ';
 
 // ============================================================
-// AVGIFTSSATSER 2026
+// AVGIFTSSATSER — lastes fra Supabase ved oppstart
+// Fallback-verdier brukes til de er lastet
 // ============================================================
-const TAX_RATES = {
-  brennevin: 9.23,  // kr per vol% per liter
-  vin:       5.41   // kr per vol% per liter
+let TAX_RATES = {
+  brennevin: 9.23,
+  vin:       5.41
 };
 const BOTTLE_LITERS = 0.75;
 
@@ -1099,6 +1261,12 @@ function calcTax(type, alcoholPct, bottles) {
   const liters = bottles * BOTTLE_LITERS;
   return rate * alcoholPct * liters;
 }
+
+// ============================================================
+// IMPORT PARSED DATA (in-memory)
+// ============================================================
+let importedStockInRows = [];
+let importedReportRows  = [];
 
 // ============================================================
 // SUPABASE CLIENT
@@ -1170,10 +1338,12 @@ async function loadPage(page) {
   if (page === 'inventory')  await loadInventory();
   if (page === 'products')   await loadProducts();
   if (page === 'customers')  await loadCustomers();
+  if (page === 'settings')   await loadSettings();
 }
 
 async function initApp() {
   setDefaultDates();
+  await loadTaxRates();
   await Promise.all([fetchProducts(), fetchCustomers()]);
   await loadDashboard();
 }
@@ -1811,6 +1981,334 @@ document.addEventListener('keydown', e => {
     handleLogin();
   }
 });
+
+// ============================================================
+// INNSTILLINGER — avgiftssatser fra Supabase
+// ============================================================
+async function loadTaxRates() {
+  const { data } = await sb.from('tax_rates').select('*').limit(1).maybeSingle();
+  if (data) {
+    TAX_RATES.vin       = parseFloat(data.vin_rate)       || 5.41;
+    TAX_RATES.brennevin = parseFloat(data.brennevin_rate) || 9.23;
+  }
+}
+
+async function loadSettings() {
+  await loadTaxRates();
+  document.getElementById('settings-rate-vin').value       = TAX_RATES.vin;
+  document.getElementById('settings-rate-brennevin').value = TAX_RATES.brennevin;
+}
+
+async function saveSettings() {
+  const vin       = parseFloat(document.getElementById('settings-rate-vin').value);
+  const brennevin = parseFloat(document.getElementById('settings-rate-brennevin').value);
+  if (!vin || !brennevin) { toast('Fyll inn gyldige satser.', 'error'); return; }
+
+  const { data: { user } } = await sb.auth.getUser();
+
+  // Upsert: oppdater hvis rad finnes, opprett ellers
+  const { data: existing } = await sb.from('tax_rates').select('id').limit(1).maybeSingle();
+  let error;
+  if (existing) {
+    ({ error } = await sb.from('tax_rates').update({ vin_rate: vin, brennevin_rate: brennevin, updated_at: new Date().toISOString() }).eq('id', existing.id));
+  } else {
+    ({ error } = await sb.from('tax_rates').insert({ user_id: user.id, vin_rate: vin, brennevin_rate: brennevin }));
+  }
+
+  if (error) { toast('Feil: ' + error.message, 'error'); return; }
+  TAX_RATES.vin       = vin;
+  TAX_RATES.brennevin = brennevin;
+  toast('Avgiftssatser lagret!', 'success');
+}
+
+// ============================================================
+// STOCK IN PREVIEW (innkjøpspris + avgift)
+// ============================================================
+function updateStockInPreview() {
+  const productId = document.getElementById('si-product').value;
+  const price     = parseFloat(document.getElementById('si-price').value) || 0;
+  const prev      = document.getElementById('si-cost-preview');
+  if (!productId || price <= 0) { prev.style.display = 'none'; return; }
+  const p = cacheProducts.find(x => x.id === productId);
+  if (!p) { prev.style.display = 'none'; return; }
+  const taxPerBottle = calcTax(p.type, p.alcohol_pct, 1);
+  const total        = price + taxPerBottle;
+  document.getElementById('si-preview-purchase').textContent = formatKr(price);
+  document.getElementById('si-preview-tax').textContent      = formatKr(taxPerBottle);
+  document.getElementById('si-preview-total').textContent    = formatKr(total);
+  prev.style.display = 'block';
+}
+
+// ============================================================
+// IMPORT — FileLese-logikk (felles for si og rp)
+// ============================================================
+function handleDragOver(e, zoneId) {
+  e.preventDefault();
+  document.getElementById(zoneId).classList.add('drag-over');
+}
+function handleDragLeave(zoneId) {
+  document.getElementById(zoneId).classList.remove('drag-over');
+}
+function handleDrop(e, type) {
+  e.preventDefault();
+  const zoneId = type === 'si' ? 'si-import-zone' : 'rp-import-zone';
+  document.getElementById(zoneId).classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) parseImportFile(file, type);
+}
+function handleImportFile(e, type) {
+  const file = e.target.files[0];
+  if (file) parseImportFile(file, type);
+  e.target.value = '';
+}
+
+function parseImportFile(file, type) {
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const data = new Uint8Array(e.target.result);
+    const wb   = XLSX.read(data, { type: 'array', cellDates: true });
+    const ws   = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+    if (type === 'si') previewStockInImport(rows);
+    else               previewReportImport(rows);
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ============================================================
+// IMPORT MOTTAK — preview & confirm
+// ============================================================
+function normalizeKey(str) {
+  return String(str).toLowerCase().trim()
+    .replace(/æ/g,'ae').replace(/ø/g,'o').replace(/å/g,'a')
+    .replace(/[^a-z0-9]/g,'');
+}
+const SI_COL_MAP = {
+  dato: ['dato','date'],
+  produkt: ['produkt','product','produktnavn'],
+  produsent: ['produsent','producer','produsent'],
+  type: ['type'],
+  alkohol: ['alkohol','alkohol%','alcohol','alcoholpct','alkoholprosent'],
+  flasker: ['flasker','bottles','antall','antallflasker'],
+  pris: ['innkjopspris','pris','price','innkjopsprisperflaske','kjopspris']
+};
+
+function mapCols(headers, colMap) {
+  const map = {};
+  const normHeaders = headers.map(h => ({ orig: h, norm: normalizeKey(h) }));
+  for (const [field, aliases] of Object.entries(colMap)) {
+    for (const alias of aliases) {
+      const found = normHeaders.find(h => h.norm === alias || h.norm.includes(alias));
+      if (found) { map[field] = found.orig; break; }
+    }
+  }
+  return map;
+}
+
+function previewStockInImport(rows) {
+  if (!rows.length) { toast('Filen er tom.', 'error'); return; }
+  const headers = Object.keys(rows[0]);
+  const colMap  = mapCols(headers, SI_COL_MAP);
+  const missing = Object.keys(SI_COL_MAP).filter(k => !colMap[k]);
+  const preview = document.getElementById('si-import-preview');
+  const title   = document.getElementById('si-import-preview-title');
+  const preRows = document.getElementById('si-import-preview-rows');
+
+  if (missing.length) {
+    title.textContent = '⚠️ Mangler kolonner';
+    preRows.innerHTML = missing.map(m => `<div class="import-preview-row error">✗ Fant ikke kolonne: ${m}</div>`).join('');
+    preRows.innerHTML += `<div class="import-preview-row" style="margin-top:8px;">Tilgjengelige kolonner: ${headers.join(', ')}</div>`;
+    document.getElementById('si-import-btn').style.display = 'none';
+    preview.style.display = 'block';
+    return;
+  }
+
+  importedStockInRows = rows.filter((r, i) => {
+    const produkt = String(r[colMap.produkt] || '').trim();
+    const flasker = parseInt(r[colMap.flasker]);
+    return produkt && flasker > 0 && String(produkt).toUpperCase() !== 'TOTALT';
+  }).map(r => ({
+    dato:      formatImportDate(r[colMap.dato]),
+    produkt:   String(r[colMap.produkt]).trim(),
+    produsent: String(r[colMap.produsent] || '').trim(),
+    type:      String(r[colMap.type] || 'vin').toLowerCase().trim(),
+    alkohol:   parseFloat(r[colMap.alkohol]) || 0,
+    flasker:   parseInt(r[colMap.flasker]) || 0,
+    pris:      parseFloat(r[colMap.pris]) || 0
+  }));
+
+  title.textContent = `Fant ${importedStockInRows.length} rader klare til import:`;
+  preRows.innerHTML = importedStockInRows.slice(0,5).map(r =>
+    `<div class="import-preview-row ok">✓ ${r.dato} &mdash; ${r.produkt} (${r.produsent}) &mdash; ${r.flasker} fl. &mdash; ${r.pris} kr</div>`
+  ).join('');
+  if (importedStockInRows.length > 5) preRows.innerHTML += `<div class="import-preview-row">...og ${importedStockInRows.length - 5} til</div>`;
+  document.getElementById('si-import-btn').style.display = 'inline-flex';
+  preview.style.display = 'block';
+}
+
+async function confirmImportStockIn() {
+  if (!importedStockInRows.length) return;
+  const { data: { user } } = await sb.auth.getUser();
+  const btn = document.getElementById('si-import-btn');
+  btn.disabled = true;
+  btn.textContent = 'Importerer...';
+  let ok = 0, fail = 0;
+
+  for (const row of importedStockInRows) {
+    // Finn eller opprett produkt
+    let product = cacheProducts.find(p =>
+      normalizeKey(p.name) === normalizeKey(row.produkt) &&
+      normalizeKey(p.producer) === normalizeKey(row.produsent)
+    );
+    if (!product) {
+      const typeClean = ['brennevin','vin'].includes(row.type) ? row.type : 'vin';
+      const { data: newProd, error: pe } = await sb.from('products').insert({
+        user_id: user.id,
+        name: row.produkt,
+        producer: row.produsent || 'Ukjent',
+        type: typeClean,
+        alcohol_pct: row.alkohol || 12
+      }).select().single();
+      if (pe) { fail++; continue; }
+      product = newProd;
+      cacheProducts.push(product);
+    }
+    const { error } = await sb.from('stock_in').insert({
+      user_id: user.id,
+      product_id: product.id,
+      bottles: row.flasker,
+      purchase_price_per_bottle: row.pris,
+      received_date: row.dato,
+      notes: 'Importert'
+    });
+    if (error) fail++; else ok++;
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Importer alle rader';
+  toast(`Import ferdig: ${ok} ok, ${fail} feilet.`, fail > 0 ? 'error' : 'success');
+  document.getElementById('si-import-preview').style.display = 'none';
+  importedStockInRows = [];
+  await loadStockIn();
+  await fetchProducts();
+}
+
+// ============================================================
+// IMPORT RAPPORT BACKUP — preview & confirm
+// ============================================================
+const RP_COL_MAP = {
+  dato:      ['dato','date'],
+  produkt:   ['produkt','product','produktnavn'],
+  produsent: ['produsent','producer'],
+  type:      ['type'],
+  kunde:     ['kunde','customer','kundenavn'],
+  flasker:   ['flasker','bottles','antall'],
+  alkohol:   ['alkohol','alkohol%','alcohol']
+};
+
+function previewReportImport(rows) {
+  if (!rows.length) { toast('Filen er tom.', 'error'); return; }
+  const headers = Object.keys(rows[0]);
+  const colMap  = mapCols(headers, RP_COL_MAP);
+  const preview = document.getElementById('rp-import-preview');
+  const title   = document.getElementById('rp-import-preview-title');
+  const preRows = document.getElementById('rp-import-preview-rows');
+
+  importedReportRows = rows.filter(r => {
+    const produkt = String(r[colMap.produkt] || '').trim();
+    const flasker = parseInt(r[colMap.flasker]);
+    return produkt && flasker > 0 && String(produkt).toUpperCase() !== 'TOTALT';
+  }).map(r => ({
+    dato:      formatImportDate(r[colMap.dato]),
+    produkt:   String(r[colMap.produkt] || '').trim(),
+    produsent: String(r[colMap.produsent] || '').trim(),
+    type:      String(r[colMap.type] || 'vin').toLowerCase().trim(),
+    kunde:     String(r[colMap.kunde] || '').trim(),
+    flasker:   parseInt(r[colMap.flasker]) || 0,
+    alkohol:   parseFloat(r[colMap.alkohol]) || 12
+  }));
+
+  title.textContent = `Fant ${importedReportRows.length} salg klare til gjenoppretting:`;
+  preRows.innerHTML = importedReportRows.slice(0,5).map(r =>
+    `<div class="import-preview-row ok">✓ ${r.dato} &mdash; ${r.produkt} &mdash; ${r.kunde || 'ingen kunde'} &mdash; ${r.flasker} fl.</div>`
+  ).join('');
+  if (importedReportRows.length > 5) preRows.innerHTML += `<div class="import-preview-row">...og ${importedReportRows.length - 5} til</div>`;
+  document.getElementById('rp-import-btn').style.display = 'inline-flex';
+  preview.style.display = 'block';
+}
+
+async function confirmImportReport() {
+  if (!importedReportRows.length) return;
+  const { data: { user } } = await sb.auth.getUser();
+  const btn = document.getElementById('rp-import-btn');
+  btn.disabled = true;
+  btn.textContent = 'Gjenoppretter...';
+  let ok = 0, fail = 0;
+
+  await fetchProducts();
+  await fetchCustomers();
+
+  for (const row of importedReportRows) {
+    // Finn eller opprett produkt
+    let product = cacheProducts.find(p =>
+      normalizeKey(p.name) === normalizeKey(row.produkt)
+    );
+    if (!product) {
+      const typeClean = ['brennevin','vin'].includes(row.type) ? row.type : 'vin';
+      const { data: newProd, error: pe } = await sb.from('products').insert({
+        user_id: user.id,
+        name: row.produkt,
+        producer: row.produsent || 'Ukjent',
+        type: typeClean,
+        alcohol_pct: row.alkohol || 12
+      }).select().single();
+      if (pe) { fail++; continue; }
+      product = newProd;
+      cacheProducts.push(product);
+    }
+
+    // Finn kunde (valgfritt)
+    let customerId = null;
+    if (row.kunde) {
+      const customer = cacheCustomers.find(c => normalizeKey(c.name) === normalizeKey(row.kunde));
+      if (customer) customerId = customer.id;
+    }
+
+    const { error } = await sb.from('stock_out').insert({
+      user_id: user.id,
+      product_id: product.id,
+      customer_id: customerId,
+      bottles: row.flasker,
+      sale_date: row.dato,
+      notes: 'Gjenopprettet fra backup'
+    });
+    if (error) fail++; else ok++;
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Gjenopprett salgsdata';
+  toast(`Gjenopprettet: ${ok} salg, ${fail} feilet.`, fail > 0 ? 'error' : 'success');
+  document.getElementById('rp-import-preview').style.display = 'none';
+  importedReportRows = [];
+}
+
+// ============================================================
+// DATO-FORMAT HJELPER FOR IMPORT
+// ============================================================
+function formatImportDate(val) {
+  if (!val) return new Date().toISOString().split('T')[0];
+  if (val instanceof Date) return val.toISOString().split('T')[0];
+  const str = String(val).trim();
+  // dd.mm.yyyy
+  const dot = str.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (dot) return `${dot[3]}-${dot[2]}-${dot[1]}`;
+  // yyyy-mm-dd already
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  // Try Date parse
+  const d = new Date(str);
+  if (!isNaN(d)) return d.toISOString().split('T')[0];
+  return new Date().toISOString().split('T')[0];
+}
 </script>
 
 </body>
