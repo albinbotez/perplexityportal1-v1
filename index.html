@@ -588,19 +588,95 @@
     .settings-rate-row input { max-width: 120px; }
     .settings-rate-row span { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 
+
+
     /* ====================================================
-       FOOTER ATTRIBUTION
+       MOBIL / RESPONSIVE
        ==================================================== */
-    .attribution {
-      text-align: center;
-      padding: 16px;
-      font-size: 11px;
-      color: var(--text-muted);
-      border-top: 1px solid var(--border);
-      margin-top: 40px;
+    .hamburger {
+      display: none;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 6px 10px;
+      color: var(--text-primary);
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
     }
-    .attribution a { color: var(--text-muted); }
-    .attribution a:hover { color: var(--text-secondary); }
+    .hamburger svg { width: 18px; height: 18px; }
+    .sidebar-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 90;
+    }
+    .sidebar-overlay.open { display: block; }
+
+    @media (max-width: 768px) {
+      .hamburger { display: flex; }
+
+      .sidebar {
+        position: fixed;
+        left: -240px;
+        top: 56px;
+        height: calc(100vh - 56px);
+        z-index: 95;
+        transition: left 0.25s ease;
+        width: 240px;
+        box-shadow: 4px 0 20px rgba(0,0,0,0.4);
+      }
+      .sidebar.open { left: 0; }
+
+      .layout { display: block; }
+
+      .main {
+        padding: 16px;
+      }
+
+      .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+      }
+
+      .card-value { font-size: 22px; }
+
+      .table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .report-controls {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .sort-controls {
+        flex-wrap: wrap;
+      }
+
+      .topbar-user { display: none; }
+
+      .page-title { font-size: 17px; }
+
+      .settings-rate-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+      }
+      .settings-rate-row input { max-width: 100%; }
+
+      .btn-submit, .btn-export { font-size: 13px; padding: 9px 14px; }
+    }
+
+    @media (max-width: 420px) {
+      .stats-grid { grid-template-columns: 1fr; }
+    }
 
     /* ====================================================
        SORT CONTROLS
@@ -667,14 +743,19 @@
       <div class="topbar-brand">Vin<span>Import</span></div>
     </div>
     <div class="topbar-right">
+      <button class="hamburger" id="hamburger-btn" onclick="toggleSidebar()" aria-label="Meny">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
       <span class="topbar-user" id="topbar-email">—</span>
       <button class="btn-logout" onclick="handleLogout()">Logg ut</button>
     </div>
   </div>
 
+  <div id="sidebar-overlay" class="sidebar-overlay" onclick="closeSidebar()"></div>
+
   <div class="layout">
     <!-- Sidebar -->
-    <nav class="sidebar">
+    <nav class="sidebar" id="sidebar">
       <div class="sidebar-section">
         <div class="sidebar-section-label">Oversikt</div>
         <div class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
@@ -1229,9 +1310,7 @@
     </main><!-- /main -->
   </div><!-- /layout -->
 
-  <footer class="attribution">
-    <a href="https://www.perplexity.ai/computer" target="_blank" rel="noopener noreferrer">Bygget med Perplexity Computer</a>
-  </footer>
+
 </div><!-- /app-page -->
 
 <!-- Toast container -->
@@ -1324,11 +1403,26 @@ sb.auth.onAuthStateChange((event, session) => {
 // ============================================================
 // NAVIGATION
 // ============================================================
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  sidebar.classList.toggle('open');
+  overlay.classList.toggle('open');
+}
+
+function closeSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  sidebar.classList.remove('open');
+  overlay.classList.remove('open');
+}
+
 function navigate(page) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   document.querySelector(`.nav-item[data-page="${page}"]`).classList.add('active');
   document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
   document.getElementById(`page-${page}`).classList.add('active');
+  closeSidebar();
   loadPage(page);
 }
 
