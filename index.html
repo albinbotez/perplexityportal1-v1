@@ -1218,12 +1218,26 @@
             <label style="margin-bottom:4px;">Måned</label>
             <input type="month" id="report-month"/>
           </div>
-          <div style="display:flex; align-items:flex-end; gap:10px; padding-bottom:1px;">
+          <div style="display:flex; align-items:flex-end; gap:10px; padding-bottom:1px; flex-wrap:wrap;">
             <button class="btn-submit" onclick="loadReport()">Vis rapport</button>
             <button class="btn-export" id="report-export-btn" onclick="exportCSV()" style="display:none;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               Eksporter CSV
             </button>
+            <button class="btn-export" id="report-elsaer-btn" onclick="exportElsaerCSV()" style="display:none;" title="Ferdig formatert fil for opplasting i Elsær (kun vin, kode 515/516/517)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Elsær-fil (vin)
+            </button>
+          </div>
+        </div>
+
+        <div class="card" id="report-ibub" style="display:none; margin-bottom:20px; max-width:680px;">
+          <div class="card-title">Lagerbalanse — vin</div>
+          <div style="display:flex; flex-wrap:wrap; gap:22px; margin-top:8px; font-size:13px; color:var(--text-secondary);">
+            <div>IB (<span id="ibub-ib-date"></span>): <strong id="ibub-ib" style="color:var(--text-primary);"></strong></div>
+            <div>+ Inn: <strong id="ibub-in" style="color:var(--accent-green);"></strong></div>
+            <div>− Ut (salg): <strong id="ibub-out" style="color:var(--accent-red);"></strong></div>
+            <div>UB (<span id="ibub-ub-date"></span>): <strong id="ibub-ub" style="color:var(--accent-blue);"></strong></div>
           </div>
         </div>
 
@@ -1340,6 +1354,56 @@ function calcTax(type, alcoholPct, bottles) {
   const rate   = TAX_RATES[type] || 0;
   const liters = bottles * BOTTLE_LITERS;
   return rate * alcoholPct * liters;
+}
+
+// ============================================================
+// AVGIFTSKODE FOR VIN (Skatteetatens Elsær-kodeverk)
+// Kun vin 4,7–22 vol% dekkes — brennevin/øl er utenfor scope.
+//   515: 4,7–10 vol%   516: 10–15 vol%   517: 15–22 vol%
+// ============================================================
+function getVinkode(alcoholPct) {
+  if (alcoholPct > 22)  return null; // utenfor vin-avgiftsgruppene
+  if (alcoholPct > 15)  return '517';
+  if (alcoholPct > 10)  return '516';
+  if (alcoholPct > 4.7) return '515';
+  return null; // under 4,7% dekkes ikke i denne versjonen
+}
+
+// ============================================================
+// IB/UB — LAGERBALANSE FOR VIN, GITT MÅNED (YYYY-MM)
+// IB = alt inn minus alt ut FOR valgt måned.
+// UB = IB + denne månedens inn − denne månedens ut.
+// Regnes kun for produkter av type 'vin'.
+// ============================================================
+function calcIBUB(monthVal) {
+  const [year, month] = monthVal.split('-').map(Number);
+  const monthStart = `${year}-${String(month).padStart(2,'0')}-01`;
+  const lastDay    = new Date(year, month, 0).getDate();
+  const monthEnd   = `${year}-${String(month).padStart(2,'0')}-${String(lastDay).padStart(2,'0')}`;
+
+  const vinProductIds = new Set(cacheProducts.filter(p => p.type === 'vin').map(p => p.id));
+
+  let ib = 0, inMonth = 0, outMonth = 0;
+
+  cacheStockIn.forEach(s => {
+    if (!vinProductIds.has(s.product_id)) return;
+    if (s.received_date < monthStart) ib += s.bottles;
+    else if (s.received_date <= monthEnd) inMonth += s.bottles;
+  });
+  cacheStockOut.forEach(s => {
+    if (!vinProductIds.has(s.product_id)) return;
+    if (s.sale_date < monthStart) ib -= s.bottles;
+    else if (s.sale_date <= monthEnd) outMonth += s.bottles;
+  });
+
+  const ub = ib + inMonth - outMonth;
+  return {
+    monthStart, monthEnd,
+    ib, ibLiters: ib * BOTTLE_LITERS,
+    inMonth, inLiters: inMonth * BOTTLE_LITERS,
+    outMonth, outLiters: outMonth * BOTTLE_LITERS,
+    ub, ubLiters: ub * BOTTLE_LITERS
+  };
 }
 
 // ============================================================
@@ -1948,6 +2012,9 @@ async function loadReport() {
   const monthVal = document.getElementById('report-month').value;
   if (!monthVal) { toast('Velg en måned.', 'error'); return; }
 
+  // Hent oppdatert produkt- og lagerdata (nødvendig for IB/UB-beregning)
+  await Promise.all([fetchProducts(), fetchStockIn(), fetchStockOut()]);
+
   const [year, month] = monthVal.split('-');
   const from = `${year}-${month}-01`;
   const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
@@ -1965,11 +2032,24 @@ async function loadReport() {
   const tbody = document.getElementById('report-table-body');
   const tfoot = document.getElementById('report-tfoot');
   const expBtn = document.getElementById('report-export-btn');
+  const elsaerBtn = document.getElementById('report-elsaer-btn');
+  const ibubBox = document.getElementById('report-ibub');
+
+  // IB/UB vises uavhengig av om det finnes salg i måneden
+  const ibub = calcIBUB(monthVal);
+  document.getElementById('ibub-ib-date').textContent = fmtDate(ibub.monthStart);
+  document.getElementById('ibub-ub-date').textContent = fmtDate(ibub.monthEnd);
+  document.getElementById('ibub-ib').textContent = `${ibub.ib} fl. (${ibub.ibLiters.toLocaleString('no-NO',{minimumFractionDigits:2,maximumFractionDigits:2})} l)`;
+  document.getElementById('ibub-in').textContent = `${ibub.inMonth} fl. (${ibub.inLiters.toLocaleString('no-NO',{minimumFractionDigits:2,maximumFractionDigits:2})} l)`;
+  document.getElementById('ibub-out').textContent = `${ibub.outMonth} fl. (${ibub.outLiters.toLocaleString('no-NO',{minimumFractionDigits:2,maximumFractionDigits:2})} l)`;
+  document.getElementById('ibub-ub').textContent = `${ibub.ub} fl. (${ibub.ubLiters.toLocaleString('no-NO',{minimumFractionDigits:2,maximumFractionDigits:2})} l)`;
+  ibubBox.style.display = 'block';
 
   if (!reportData.length) {
     tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><p>Ingen salg i valgt måned.</p></div></td></tr>`;
     tfoot.style.display = 'none';
     expBtn.style.display = 'none';
+    elsaerBtn.style.display = 'none';
     return;
   }
 
@@ -1998,6 +2078,7 @@ async function loadReport() {
   document.getElementById('report-total-tax').textContent = formatKr(totalTax);
   tfoot.style.display = '';
   expBtn.style.display = 'inline-flex';
+  elsaerBtn.style.display = 'inline-flex';
 }
 
 function exportCSV() {
@@ -2038,6 +2119,66 @@ function exportCSV() {
   a.click();
   URL.revokeObjectURL(url);
   toast('CSV eksportert!', 'success');
+}
+
+// ============================================================
+// ELSÆR-EKSPORT — kun vin, summert per avgiftsgruppe (515/516/517)
+// Klar for direkte filopplasting i Skatteetatens Elsær-portal.
+// Format: Avgiftstype;Avgiftsgruppe;Liter;Volumprosent;Grunnlag;Sats;Avgift
+// ============================================================
+function exportElsaerCSV() {
+  if (!reportData.length) return;
+  const monthVal = document.getElementById('report-month').value || 'rapport';
+
+  const groups = {}; // kode -> { liter, volSum (for vektet snitt), avgift }
+  reportData.forEach(s => {
+    const p = s.product;
+    if (!p || p.type !== 'vin') return; // kun vin
+    const kode = getVinkode(p.alcohol_pct);
+    if (!kode) return; // utenfor 4,7–22% — dekkes ikke
+
+    const liter  = s.bottles * BOTTLE_LITERS;
+    const avgift = calcTax(p.type, p.alcohol_pct, s.bottles);
+
+    if (!groups[kode]) groups[kode] = { liter: 0, volSum: 0, avgift: 0 };
+    groups[kode].liter  += liter;
+    groups[kode].volSum += p.alcohol_pct * liter; // vektet mot volum
+    groups[kode].avgift += avgift;
+  });
+
+  const rate = TAX_RATES.vin;
+  const rows = ['515', '516', '517']
+    .filter(kode => groups[kode] && groups[kode].liter > 0)
+    .map(kode => {
+      const g       = groups[kode];
+      const volPct  = g.volSum / g.liter;
+      const grunnlag = g.liter * volPct;
+      return [
+        'BV',
+        kode,
+        g.liter.toFixed(2).replace('.', ','),
+        volPct.toFixed(2).replace('.', ','),
+        grunnlag.toFixed(2).replace('.', ','),
+        rate.toFixed(2).replace('.', ','),
+        g.avgift.toFixed(2).replace('.', ',')
+      ].join(';');
+    });
+
+  if (!rows.length) {
+    toast('Ingen vin-salg med gyldig avgiftskode (4,7–22%) i denne perioden.', 'error');
+    return;
+  }
+
+  const headers = 'Avgiftstype;Avgiftsgruppe;Liter;Volumprosent;Grunnlag;Sats;Avgift';
+  const csv  = [headers, ...rows].join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = `elsaer-vin-${monthVal}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('Elsær-fil eksportert — last den rett opp uten å åpne den i Excel.', 'success');
 }
 
 // ============================================================
