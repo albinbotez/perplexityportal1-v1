@@ -913,6 +913,10 @@
               <label>Dato</label>
               <input type="date" id="si-date"/>
             </div>
+            <div>
+              <label>Dokumentreferanse</label>
+              <input type="text" id="si-docref" placeholder="Faktura-/følgeseddelnr."/>
+            </div>
             <div class="form-grid-full">
               <label>Notater (valgfritt)</label>
               <input type="text" id="si-notes" placeholder="Eventuelle kommentarer…"/>
@@ -1011,6 +1015,10 @@
             <div>
               <label>Bevegelsestype</label>
               <select id="so-type" onchange="updateSaleTypeFields()"></select>
+            </div>
+            <div>
+              <label>Dokumentreferanse</label>
+              <input type="text" id="so-docref" placeholder="Faktura-/ordrenr."/>
             </div>
             <div id="so-origperiod-wrap" style="display:none;">
               <label>Opprinnelig uttaksperiode</label>
@@ -1278,20 +1286,26 @@
                   <th>Antall (liter)</th>
                   <th>Antall2 (vol%)</th>
                   <th>Sats</th>
-                  <th>Beregnet avgift</th>
+                  <th>Estimert avgift</th>
                 </tr>
               </thead>
               <tbody id="saeravgift-tbody"></tbody>
               <tfoot>
                 <tr style="font-weight:700;">
-                  <td colspan="8" style="padding:12px 14px; color:var(--text-secondary);">Sum (rundet ned til hele kroner)</td>
+                  <td colspan="8" style="padding:12px 14px; color:var(--text-secondary);">Estimert sum (sum av spesifikasjonsradene, rundet ned til hele kroner)</td>
                   <td id="saeravgift-total" style="padding:12px 14px; color:var(--accent-blue);"></td>
                 </tr>
               </tfoot>
             </table>
           </div>
+          <div class="sa-errors" style="background:var(--bg-hover);border-color:var(--border);color:var(--text-secondary);margin-top:12px;">
+            <strong style="color:var(--text-primary);">Estimat — ikke endelig avgift.</strong>
+            Skatteetaten beregner endelig beløp ut fra filen. Beløpene her er gulv-avrundet (også negative beløp) og kan avvike fra Skatteetatens beregning.
+          </div>
+          <div id="saeravgift-status"></div>
+          <div id="saeravgift-history"></div>
           <div class="sa-note">
-            Beløpene er et estimat — filen inneholder ikke sats eller beløp, Skatteetaten beregner avgiften selv.
+            Filen inneholder ikke sats eller beløp.
             Filen inneholder alltid <strong>hele periodens innhold</strong>; ved endringsmelding lastes en ny fil med hele perioden opp, ikke differansen.
             Spesifikasjonen (xlsx) er dokumentasjon for særavgiftsregnskapet og skal ikke lastes opp.
           </div>
@@ -1387,10 +1401,11 @@
           <div style="font-size:13px; font-weight:600; margin:18px 0 6px;">Bevegelsestyper → tilleggskode</div>
           <div class="sa-config-scroll">
             <table class="sa-config-table">
-              <thead><tr><th>Bevegelsestype</th><th>Tilleggskode</th><th>Lager</th><th>Avgift i forhåndsvisning</th><th>Krever opprinnelig periode</th></tr></thead>
+              <thead><tr><th>Nøkkel</th><th>Bevegelsestype</th><th>Tilleggskode</th><th>Lager</th><th>Avgift i forhåndsvisning</th><th>Krever opprinnelig periode</th><th></th></tr></thead>
               <tbody id="sa-codes-body"></tbody>
             </table>
           </div>
+          <button class="btn-export" onclick="addSaCodeRow()">+ Legg til bevegelsestype</button>
 
           <div class="sa-note">
             Grenser: styrke over «Styrke &gt;» og til og med «Styrke ≤». «Per vol%» betyr at avgiften regnes per liter × volumprosent og at styrken sendes som antall2.
@@ -1475,6 +1490,53 @@ function stockDirection(s) {
 }
 function isSale(s) {
   return movementType(s) === 'salg';
+}
+
+// ============================================================
+// APPEND-ONLY LAGER — bevegelser slettes/endres aldri. En feilført
+// bevegelse reverseres med en korreksjonsrad (samme dato og felter,
+// negativt antall), og riktig bevegelse registreres som ny rad.
+// ============================================================
+const STOCK_IN_COPY_FIELDS  = ['product_id', 'received_date', 'purchase_price_per_bottle', 'document_ref'];
+const STOCK_OUT_COPY_FIELDS = ['product_id', 'customer_id', 'sale_date', 'movement_type', 'original_period', 'document_ref'];
+const MIGRATION_HINT = ' Kjør supabase/migrations/20260924_append_only_lager.sql i Supabase.';
+
+function correctedIds(rows) {
+  return new Set(rows.filter(r => r.corrects_id).map(r => r.corrects_id));
+}
+
+// Handlingscelle: «Korriger»-knapp, eller status for korreksjon/korrigert rad
+function correctionCell(s, corrected, fn) {
+  if (s.corrects_id) return `<span class="badge" style="background:var(--accent-yellow-bg);color:var(--accent-yellow);">Korreksjon</span>`;
+  if (corrected.has(s.id)) return `<span class="badge" style="background:var(--bg-hover);color:var(--text-muted);">Korrigert</span>`;
+  return `<button class="btn-danger" onclick="${fn}('${s.id}')">Korriger</button>`;
+}
+
+function docRefNote(s) {
+  return s.document_ref ? `<br><span style="font-size:11px;color:var(--text-muted);">Dok: ${esc(s.document_ref)}</span>` : '';
+}
+
+async function insertCorrection(table, rows, id, copyFields) {
+  const original = rows.find(r => r.id === id);
+  let reversal;
+  try {
+    reversal = Saeravgift.buildReversal(original, copyFields, rows);
+  } catch (e) {
+    toast(e.message, 'error');
+    return null;
+  }
+  const { data: { user } } = await sb.auth.getUser();
+  const { error } = await sb.from(table).insert({
+    ...reversal,
+    user_id: user.id,
+    notes: `Korreksjon av bevegelse registrert ${fmtDate((original.recorded_at || original.created_at || '').slice(0, 10))}`
+  });
+  if (error) {
+    const hint = /corrects_id|document_ref|recorded_at|bottles_sign/.test(error.message) ? MIGRATION_HINT : '';
+    toast('Korreksjonen ble ikke lagret: ' + error.message + hint, 'error');
+    return null;
+  }
+  return original;
 }
 
 // ============================================================
@@ -1747,7 +1809,9 @@ async function loadDashboard() {
   document.getElementById('stat-bottles').textContent = totalBottles.toLocaleString('no-NO');
   document.getElementById('stat-bottles-liters').textContent = totalLiters.toLocaleString('no-NO', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' liter';
   document.getElementById('stat-tax').textContent     = formatKr(totalTax);
-  document.getElementById('stat-sales').textContent   = thisMo.length.toLocaleString('no-NO');
+  const correctedOut = correctedIds(cacheStockOut);
+  const salesCount = thisMo.filter(s => !s.corrects_id && !correctedOut.has(s.id)).length;
+  document.getElementById('stat-sales').textContent   = salesCount.toLocaleString('no-NO');
   document.getElementById('stat-products').textContent = cacheProducts.length.toLocaleString('no-NO');
 
   renderDashboardTable();
@@ -1803,20 +1867,21 @@ function renderStockInTable() {
     tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><p>Ingen mottak registrert ennå.</p></div></td></tr>`;
     return;
   }
+  const corrected = correctedIds(cacheStockIn);
   tbody.innerHTML = cacheStockIn.map(s => {
     const total        = s.bottles * s.purchase_price_per_bottle;
     const p            = s.product;
     const taxPerBottle = p ? calcTax(p.type, p.alcohol_pct, 1) : 0;
     const priceWithTax = s.purchase_price_per_bottle + taxPerBottle;
-    return `<tr>
-      <td>${fmtDate(s.received_date)}</td>
+    return `<tr style="${s.corrects_id || corrected.has(s.id) ? 'opacity:0.6;' : ''}">
+      <td>${fmtDate(s.received_date)}${docRefNote(s)}</td>
       <td style="font-weight:600;">${esc(p?.name || '—')}</td>
       <td>${esc(p?.producer || '—')}</td>
       <td>${s.bottles} fl.</td>
       <td>${formatKr(s.purchase_price_per_bottle)}</td>
       <td style="color:var(--accent-blue); font-weight:600;">${formatKr(priceWithTax)}</td>
       <td>${formatKr(total)}</td>
-      <td><button class="btn-danger" onclick="deleteStockIn('${s.id}')">Slett</button></td>
+      <td>${correctionCell(s, corrected, 'correctStockIn')}</td>
     </tr>`;
   }).join('');
 }
@@ -1827,8 +1892,10 @@ async function submitStockIn() {
   const price     = parseFloat(document.getElementById('si-price').value);
   const date      = document.getElementById('si-date').value;
   const notes     = document.getElementById('si-notes').value.trim();
+  const docRef    = document.getElementById('si-docref').value.trim();
 
   if (!productId || !bottles || !price || !date) { toast('Fyll ut alle obligatoriske felt.', 'error'); return; }
+  if (bottles < 1) { toast('Antall må være positivt. Feil rettes med «Korriger» i historikken.', 'error'); return; }
 
   const { data: { user } } = await sb.auth.getUser();
   const btn = document.getElementById('si-submit-btn');
@@ -1840,7 +1907,8 @@ async function submitStockIn() {
     bottles,
     purchase_price_per_bottle: price,
     received_date: date,
-    notes: notes || null
+    notes: notes || null,
+    ...(docRef ? { document_ref: docRef } : {})
   });
 
   btn.disabled = false;
@@ -1849,13 +1917,22 @@ async function submitStockIn() {
   document.getElementById('si-bottles').value = '';
   document.getElementById('si-price').value   = '';
   document.getElementById('si-notes').value   = '';
+  document.getElementById('si-docref').value  = '';
   await loadStockIn();
 }
 
-async function deleteStockIn(id) {
-  if (!confirm('Slette dette mottaket?')) return;
-  await sb.from('stock_in').delete().eq('id', id);
-  toast('Mottaket ble slettet.', 'success');
+async function correctStockIn(id) {
+  if (!confirm('Korrigere dette mottaket?\n\nMottaket slettes ikke. Det reverseres med en korreksjonsrad (samme dato, negativt antall), og skjemaet fylles ut slik at du kan registrere riktig mottak.')) return;
+  const original = await insertCorrection('stock_in', cacheStockIn, id, STOCK_IN_COPY_FIELDS);
+  if (!original) return;
+  document.getElementById('si-product').value = original.product_id;
+  document.getElementById('si-bottles').value = original.bottles;
+  document.getElementById('si-price').value   = original.purchase_price_per_bottle;
+  document.getElementById('si-date').value    = original.received_date;
+  document.getElementById('si-docref').value  = original.document_ref || '';
+  updateStockInPreview();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  toast('Mottaket er reversert. Rett opp verdiene i skjemaet og registrer riktig mottak.', 'success');
   await loadStockIn();
 }
 
@@ -1887,19 +1964,20 @@ function renderStockOutTable() {
     tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><p>Ingen salg registrert ennå.</p></div></td></tr>`;
     return;
   }
+  const corrected = correctedIds(cacheStockOut);
   tbody.innerHTML = cacheStockOut.map(s => {
     const p   = s.product;
     const tax = p ? calcTax(p.type, p.alcohol_pct, s.bottles) : 0;
     const rate = p ? TAX_RATES[p.type] : 0;
-    return `<tr>
-      <td>${fmtDate(s.sale_date)}</td>
+    return `<tr style="${s.corrects_id || corrected.has(s.id) ? 'opacity:0.6;' : ''}">
+      <td>${fmtDate(s.sale_date)}${docRefNote(s)}</td>
       <td style="font-weight:600;">${esc(p?.name || '—')}</td>
       <td>${esc(s.customer?.name || '—')}${movementTypeNote(s)}</td>
       <td>${p ? `<span class="badge ${p.type}">${p.type === 'brennevin' ? 'Brennevin' : 'Vin'}</span>` : '—'}</td>
       <td>${s.bottles} fl.</td>
       <td>${p?.alcohol_pct || '—'}%</td>
       <td style="color:var(--accent-blue); font-weight:600;">${isSale(s) ? formatKr(tax) : '—'}</td>
-      <td><button class="btn-danger" onclick="deleteStockOut('${s.id}')">Slett</button></td>
+      <td>${correctionCell(s, corrected, 'correctStockOut')}</td>
     </tr>`;
   }).join('');
 }
@@ -1913,9 +1991,11 @@ async function submitStockOut() {
   const type       = document.getElementById('so-type').value || 'salg';
   const code       = Saeravgift.findMovementCode(SA_CONFIG, type);
   const origPeriod = document.getElementById('so-origperiod').value;
+  const docRef     = document.getElementById('so-docref').value.trim();
 
   if (!productId || !bottles || !date) { toast('Fyll ut alle obligatoriske felt.', 'error'); return; }
   if (code?.krevPeriode && !origPeriod) { toast('Oppgi opprinnelig uttaksperiode for returen.', 'error'); return; }
+  if (bottles < 1) { toast('Antall må være positivt. Feil rettes med «Korriger» i historikken.', 'error'); return; }
 
   const { data: { user } } = await sb.auth.getUser();
   const btn = document.getElementById('so-submit-btn');
@@ -1928,6 +2008,7 @@ async function submitStockOut() {
     bottles,
     sale_date: date,
     notes: notes || null,
+    ...(docRef ? { document_ref: docRef } : {}),
     // Kolonnene sendes kun for andre bevegelser enn salg, slik at vanlig
     // salg fungerer også før migreringen er kjørt.
     ...(type !== 'salg' ? { movement_type: type, original_period: code?.krevPeriode ? origPeriod : null } : {})
@@ -1936,7 +2017,8 @@ async function submitStockOut() {
   btn.disabled = false;
   if (error) {
     const hint = /movement_type|original_period/.test(error.message)
-      ? ' Kjør supabase/migrations/20260923_saeravgiftsmelding.sql i Supabase.' : '';
+      ? ' Kjør supabase/migrations/20260923_saeravgiftsmelding.sql i Supabase.'
+      : /document_ref/.test(error.message) ? MIGRATION_HINT : '';
     toast('Feil ved lagring: ' + error.message + hint, 'error');
     return;
   }
@@ -1948,6 +2030,7 @@ async function submitStockOut() {
   document.getElementById('so-bottles').value = '';
   document.getElementById('so-notes').value   = '';
   document.getElementById('so-origperiod').value = '';
+  document.getElementById('so-docref').value = '';
   document.getElementById('sale-preview').style.display = 'none';
   await loadStockOut();
 }
@@ -1970,16 +2053,27 @@ function updateSaleTypeFields() {
 }
 
 function movementTypeNote(s) {
+  if (s.corrects_id) return `<br><span style="font-size:11px;color:var(--accent-yellow);">Korreksjon (reversering)${isSale(s) ? '' : ` av ${esc(movementCode(s)?.label || s.movement_type)}`}</span>`;
   if (isSale(s)) return '';
   const c = movementCode(s);
   const per = s.original_period ? `, levert ${esc(Saeravgift.toPeriode(s.original_period))}` : '';
   return `<br><span style="font-size:11px;color:var(--accent-yellow);">${esc(c?.label || s.movement_type)}${c?.kode ? ` · kode ${esc(c.kode)}` : ''}${per}</span>`;
 }
 
-async function deleteStockOut(id) {
-  if (!confirm('Slette dette salget?')) return;
-  await sb.from('stock_out').delete().eq('id', id);
-  toast('Salget ble slettet.', 'success');
+async function correctStockOut(id) {
+  if (!confirm('Korrigere denne bevegelsen?\n\nBevegelsen slettes ikke. Den reverseres med en korreksjonsrad (samme dato, negativt antall), og skjemaet fylles ut slik at du kan registrere riktig bevegelse.\n\nGjelder den en periode som allerede er rapportert, må det sendes endringsmelding for perioden.')) return;
+  const original = await insertCorrection('stock_out', cacheStockOut, id, STOCK_OUT_COPY_FIELDS);
+  if (!original) return;
+  document.getElementById('so-product').value  = original.product_id;
+  document.getElementById('so-customer').value = original.customer_id || '';
+  document.getElementById('so-bottles').value  = original.bottles;
+  document.getElementById('so-date').value     = original.sale_date;
+  document.getElementById('so-type').value     = movementType(original);
+  document.getElementById('so-origperiod').value = original.original_period || '';
+  document.getElementById('so-docref').value   = original.document_ref || '';
+  updateSaleTypeFields();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  toast('Bevegelsen er reversert. Rett opp verdiene i skjemaet og registrer riktig bevegelse.', 'success');
   await loadStockOut();
 }
 
@@ -2293,6 +2387,9 @@ function saeravgiftMovements() {
     type: movementType(s),
     bottles: s.bottles,
     original_period: s.original_period || null,
+    document_ref: s.document_ref || null,
+    corrects_id: s.corrects_id || null,
+    recorded_at: s.recorded_at || null,
     notes: s.notes,
     product: s.product,
     customer: s.customer
@@ -2316,6 +2413,8 @@ function renderSaeravgiftPreview(monthVal) {
     wrap.style.display = 'none';
     saBtn.style.display = 'none';
     specBtn.style.display = 'none';
+    document.getElementById('saeravgift-status').innerHTML = '';
+    loadSaeravgiftHistory(monthVal);
     return;
   }
 
@@ -2336,10 +2435,53 @@ function renderSaeravgiftPreview(monthVal) {
       <td style="color:var(--accent-blue); font-weight:600;">${r.avgift == null ? '—' : r.code.avgiftFortegn === 0 ? 'Avgiftsfritt' : formatKr(r.avgift)}</td>
     </tr>`).join('');
   document.getElementById('saeravgift-total').textContent =
-    `${formatKr(pv.totalAvrundet)} (${formatKr(pv.total)})`;
+    `${formatKrWhole(pv.totalAvrundet)} (${formatKr(pv.total)})`;
   wrap.style.display = '';
   saBtn.style.display = 'inline-flex';
   specBtn.style.display = 'inline-flex';
+  loadSaeravgiftHistory(monthVal);
+}
+
+// ------------------------------------------------------------
+// Eksportlogg: tidspunkt, bruker, periode og SHA-256 av filinnholdet
+// ------------------------------------------------------------
+async function loadSaeravgiftHistory(monthVal) {
+  const statusBox  = document.getElementById('saeravgift-status');
+  const historyBox = document.getElementById('saeravgift-history');
+  const { data, error } = await sb.from('saeravgift_exports')
+    .select('id, created_at, user_email, period, file_name, sha256, line_count, estimated_total_ore')
+    .eq('period', monthVal)
+    .order('created_at', { ascending: false });
+  if (error) {
+    statusBox.innerHTML = `<div class="sa-errors">Eksportloggen er ikke tilgjengelig, og eksport er derfor sperret: ${esc(error.message)}.${esc(MIGRATION_HINT)}</div>`;
+    historyBox.innerHTML = '';
+    return;
+  }
+  const exportsForPeriod = data || [];
+
+  if (saeravgiftExport) {
+    const hash = await Saeravgift.sha256Hex(saeravgiftExport.csv);
+    const st = Saeravgift.exportStatus(hash, exportsForPeriod);
+    const when = st.last ? fmtDateTime(st.last.created_at) : '';
+    statusBox.innerHTML =
+      st.state === 'new' ? `<div class="sa-note">Perioden er ikke eksportert tidligere.</div>`
+      : st.state === 'unchanged' ? `<div class="sa-note">Filen er identisk med eksporten ${esc(when)}.</div>`
+      : `<div class="sa-errors" style="background:var(--accent-yellow-bg);border-color:var(--accent-yellow);color:var(--accent-yellow);">Innholdet er endret siden eksporten ${esc(when)} (f.eks. etter en korreksjon). Er perioden allerede levert, lastes den nye filen opp som endringsmelding — den inneholder hele perioden.</div>`;
+  }
+
+  historyBox.innerHTML = exportsForPeriod.length ? `
+    <div style="font-size:13px; font-weight:600; margin:14px 0 6px;">Eksporthistorikk for ${esc(monthVal)}</div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Tidspunkt</th><th>Bruker</th><th>Fil</th><th>Linjer</th><th>Estimat</th><th>SHA-256</th></tr></thead>
+      <tbody>${exportsForPeriod.map(x => `<tr>
+        <td>${esc(fmtDateTime(x.created_at))}</td>
+        <td>${esc(x.user_email || '—')}</td>
+        <td>${esc(x.file_name)}</td>
+        <td>${x.line_count}</td>
+        <td>${x.estimated_total_ore != null ? formatKrWhole(Math.floor(x.estimated_total_ore / 100)) : '—'}</td>
+        <td style="font-family:monospace; font-size:11px;" title="${esc(x.sha256)}">${esc(x.sha256.slice(0, 16))}…</td>
+      </tr>`).join('')}</tbody>
+    </table></div>` : '';
 }
 
 function downloadBlob(blob, fileName) {
@@ -2351,17 +2493,45 @@ function downloadBlob(blob, fileName) {
   URL.revokeObjectURL(url);
 }
 
-function exportSaeravgiftCSV() {
-  if (!saeravgiftExport) return;
-  // UTF-8 uten BOM, CRLF-linjeskift (bygget i saeravgift.js)
-  const bytes = new TextEncoder().encode(saeravgiftExport.csv);
-  downloadBlob(new Blob([bytes], { type: 'text/csv' }), saeravgiftExport.csvFileName);
-  toast('Særavgiftsfil eksportert — last den opp uten å åpne den i Excel.', 'success');
-}
-
-function exportSaeravgiftSpec() {
+// Hver eksport logges FØR filen lastes ned. Feiler loggingen, lastes
+// ingenting ned — slik finnes det alltid spor av hva som er levert.
+async function exportSaeravgiftCSV() {
   if (!saeravgiftExport) return;
   const ex = saeravgiftExport;
+  const btn = document.getElementById('report-saeravgift-btn');
+  btn.disabled = true;
+  try {
+    const hash = await Saeravgift.sha256Hex(ex.csv);
+    const { data: { user } } = await sb.auth.getUser();
+    const { error } = await sb.from('saeravgift_exports').insert({
+      period: ex.period,
+      orgnr: ex.orgnr,
+      file_name: ex.csvFileName,
+      sha256: hash,
+      line_count: ex.lines.length,
+      estimated_total_ore: ex.preview.totalOre,
+      csv_content: ex.csv,
+      user_email: user?.email || null
+    });
+    if (error) {
+      toast('Eksporten ble ikke logget, så filen er ikke lastet ned: ' + error.message + MIGRATION_HINT, 'error');
+      return;
+    }
+    // UTF-8 uten BOM, CRLF-linjeskift (bygget i saeravgift.js)
+    downloadBlob(new Blob([new TextEncoder().encode(ex.csv)], { type: 'text/csv' }), ex.csvFileName);
+    toast('Særavgiftsfil eksportert og logget — last den opp uten å åpne den i Excel.', 'success');
+    await loadSaeravgiftHistory(ex.period);
+  } catch (e) {
+    toast('Eksporten feilet, ingen fil er lastet ned: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function exportSaeravgiftSpec() {
+  if (!saeravgiftExport) return;
+  const ex = saeravgiftExport;
+  const hash = await Saeravgift.sha256Hex(ex.csv);
   const wb = XLSX.utils.book_new();
 
   const specSheet = XLSX.utils.json_to_sheet(ex.specification);
@@ -2376,10 +2546,10 @@ function exportSaeravgiftSpec() {
     'Antall (liter)': Number(Saeravgift.fmtNumber(r.liters, 4)),
     'Antall2 (vol%)': r.styrke != null ? r.styrke : '',
     'Sats': r.sats != null ? r.sats : '',
-    'Beregnet avgift (kr)': r.avgift != null ? r.avgift : ''
+    'Estimert avgift (kr)': r.avgift != null ? r.avgift : ''
   }));
-  summary.push({ 'Linjenr': 'Sum', 'Beregnet avgift (kr)': ex.preview.total });
-  summary.push({ 'Linjenr': 'Sum rundet ned', 'Beregnet avgift (kr)': ex.preview.totalAvrundet });
+  summary.push({ 'Linjenr': 'Sum av spesifikasjonsradene', 'Estimert avgift (kr)': ex.preview.total });
+  summary.push({ 'Linjenr': 'Sum rundet ned (gulv)', 'Estimert avgift (kr)': ex.preview.totalAvrundet });
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'Linjer i fil');
 
   const info = XLSX.utils.aoa_to_sheet([
@@ -2387,7 +2557,10 @@ function exportSaeravgiftSpec() {
     ['Organisasjonsnummer', ex.orgnr],
     ['Periode', ex.period],
     ['Opplastingsfil', ex.csvFileName],
-    ['Generert', new Date().toLocaleString('no-NO')]
+    ['SHA-256 av opplastingsfil', hash],
+    ['Generert', new Date().toLocaleString('no-NO')],
+    [],
+    ['Beløpene er estimater (gulv-avrundet). Skatteetaten beregner endelig avgift ut fra opplastingsfilen.']
   ]);
   XLSX.utils.book_append_sheet(wb, info, 'Info');
 
@@ -2400,6 +2573,15 @@ function exportSaeravgiftSpec() {
 // ============================================================
 function formatKr(amount) {
   return new Intl.NumberFormat('no-NO', { style: 'currency', currency: 'NOK', minimumFractionDigits: 2 }).format(amount);
+}
+
+function formatKrWhole(amount) {
+  return new Intl.NumberFormat('no-NO', { style: 'currency', currency: 'NOK', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amount);
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('no-NO', { dateStyle: 'short', timeStyle: 'short' });
 }
 
 function fmtDate(dateStr) {
@@ -2507,17 +2689,35 @@ async function loadSaeravgiftConfig() {
 function renderSaeravgiftSettings(cfg = SA_CONFIG) {
   document.getElementById('sa-orgnr').value = cfg.orgnr || '';
   document.getElementById('sa-groups-body').innerHTML = cfg.groups.map(saGroupRowHtml).join('');
-  document.getElementById('sa-codes-body').innerHTML = cfg.movementCodes.map(c => `<tr data-type="${esc(c.type)}">
-      <td>${esc(c.label)}</td>
-      <td><input type="text" data-f="kode" maxlength="2" value="${esc(c.kode)}" placeholder="tom" style="width:60px;"/></td>
-      <td>${c.lagerRetning > 0 ? 'Inn' : 'Ut'}</td>
-      <td><select data-f="avgiftFortegn">
-        <option value="1" ${c.avgiftFortegn === 1 ? 'selected' : ''}>Avgift</option>
-        <option value="0" ${c.avgiftFortegn === 0 ? 'selected' : ''}>Avgiftsfritt</option>
-        <option value="-1" ${c.avgiftFortegn === -1 ? 'selected' : ''}>Fradrag</option>
-      </select></td>
-      <td><input type="checkbox" data-f="krevPeriode" ${c.krevPeriode ? 'checked' : ''} style="width:auto;"/></td>
-    </tr>`).join('');
+  document.getElementById('sa-codes-body').innerHTML = cfg.movementCodes.map(saCodeRowHtml).join('');
+}
+
+// Tilleggskode-tabellen er data: nye bevegelsestyper og koder legges til
+// her uten kodeendring. Standardtypene kan justeres, men ikke fjernes.
+function saCodeRowHtml(c) {
+  const builtIn = Saeravgift.DEFAULT_MOVEMENT_CODES.some(d => d.type === c.type);
+  const v = x => x == null ? '' : esc(String(x));
+  return `<tr>
+    <td><input type="text" data-f="type" value="${v(c.type)}" ${builtIn ? 'readonly' : ''} placeholder="f.eks. eksport_svalbard" style="width:130px;"/></td>
+    <td><input type="text" data-f="label" value="${v(c.label)}" placeholder="Navn"/></td>
+    <td><input type="text" data-f="kode" maxlength="2" value="${v(c.kode)}" placeholder="tom" style="width:60px;"/></td>
+    <td><select data-f="lagerRetning">
+      <option value="-1" ${c.lagerRetning !== 1 ? 'selected' : ''}>Ut</option>
+      <option value="1" ${c.lagerRetning === 1 ? 'selected' : ''}>Inn</option>
+    </select></td>
+    <td><select data-f="avgiftFortegn">
+      <option value="1" ${c.avgiftFortegn === 1 ? 'selected' : ''}>Avgift</option>
+      <option value="0" ${c.avgiftFortegn === 0 ? 'selected' : ''}>Avgiftsfritt</option>
+      <option value="-1" ${c.avgiftFortegn === -1 ? 'selected' : ''}>Fradrag</option>
+    </select></td>
+    <td><input type="checkbox" data-f="krevPeriode" ${c.krevPeriode ? 'checked' : ''} style="width:auto;"/></td>
+    <td>${builtIn ? '' : `<button class="btn-danger" onclick="this.closest('tr').remove()">Fjern</button>`}</td>
+  </tr>`;
+}
+
+function addSaCodeRow() {
+  document.getElementById('sa-codes-body').insertAdjacentHTML('beforeend',
+    saCodeRowHtml({ type: '', label: '', kode: '', lagerRetning: -1, avgiftFortegn: 0, krevPeriode: false }));
 }
 
 function saGroupRowHtml(g) {
@@ -2570,18 +2770,17 @@ function readSaeravgiftSettings() {
   });
 
   const movementCodes = [...document.querySelectorAll('#sa-codes-body tr')].map(tr => {
-    const base = SA_CONFIG.movementCodes.find(c => c.type === tr.dataset.type)
-      || Saeravgift.DEFAULT_MOVEMENT_CODES.find(c => c.type === tr.dataset.type);
+    const f = name => tr.querySelector(`[data-f="${name}"]`);
     return {
-      ...base,
-      kode: tr.querySelector('[data-f="kode"]').value.trim(),
-      avgiftFortegn: parseInt(tr.querySelector('[data-f="avgiftFortegn"]').value, 10),
-      krevPeriode: tr.querySelector('[data-f="krevPeriode"]').checked
+      type: f('type').value.trim(),
+      label: f('label').value.trim(),
+      kode: f('kode').value.trim(),
+      lagerRetning: parseInt(f('lagerRetning').value, 10),
+      avgiftFortegn: parseInt(f('avgiftFortegn').value, 10),
+      krevPeriode: f('krevPeriode').checked
     };
   });
-  movementCodes.forEach(c => {
-    if (c.kode && !/^\d{2}$/.test(c.kode)) errors.push(`Tilleggskode for «${c.label}» må være to siffer eller tom.`);
-  });
+  errors.push(...Saeravgift.validateMovementCodes(movementCodes));
 
   return { errors, config: { orgnr, groups, movementCodes } };
 }

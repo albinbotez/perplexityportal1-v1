@@ -111,15 +111,21 @@
     return config.movementCodes.find(c => c.type === (type || 'salg')) || null;
   }
 
+  // Liter med fortegn. Korreksjonsrader (reversering) har negativt antall.
   function movementLiters(m) {
     if (m.liters != null) return Number(m.liters);
     return Number(m.bottles) * BOTTLE_LITERS;
   }
 
+  function isCorrection(m) {
+    return m.corrects_id != null && m.corrects_id !== '';
+  }
+
   // ----------------------------------------------------------
   // Klassifiser og valider alle bevegelser i perioden.
   //   movements: [{ id, date:'yyyy-mm-dd', type, bottles|liters,
-  //                 original_period, product:{name,type,alcohol_pct}, customer }]
+  //                 original_period, document_ref, corrects_id,
+  //                 product:{name,type,alcohol_pct}, customer }]
   //   period:    'yyyy-mm'
   // Kaster SaeravgiftError med alle feil samlet — ingen fil lages da.
   // ----------------------------------------------------------
@@ -153,8 +159,11 @@
         return;
       }
       const liters = movementLiters(m);
-      if (!(liters > 0)) {
-        errors.push(`Bevegelse${when} for ${name} har ugyldig antall.`);
+      const correction = isCorrection(m);
+      if (!Number.isFinite(liters) || liters === 0 || (liters < 0) !== correction) {
+        errors.push(correction
+          ? `Korreksjonsrad${when} for ${name} må ha negativt antall.`
+          : `Bevegelse${when} for ${name} har ugyldig antall (negativt antall er kun lov på korreksjonsrader).`);
         return;
       }
 
@@ -173,6 +182,7 @@
         group,
         code,
         liters,
+        correction,
         styrke: Math.round(Number(pct) * 10) / 10,
         periode: linjePeriode
       });
@@ -185,6 +195,8 @@
   // ----------------------------------------------------------
   // Aggreger på (avgiftstype, avgiftsgruppe, styrke, tilleggskode, periode)
   // Avgiftsfrie bevegelser får egne linjer — nettoføres aldri.
+  // Korreksjonsrader har samme nøkkel som bevegelsen de reverserer og
+  // opphever den; linjer som blir 0 liter tas ikke med i filen.
   // ----------------------------------------------------------
   function aggregate(classified) {
     const map = new Map();
@@ -209,7 +221,21 @@
       line.movements.push(c);
     });
 
-    const lines = [...map.values()].sort((a, b) =>
+    const errors = [];
+    const lines = [];
+    [...map.values()].forEach(l => {
+      l.liters = Number(fmtNumber(l.liters, 4));
+      l.movements.forEach(c => { c.linjenr = null; });
+      if (l.liters < 0) {
+        errors.push(`Negativt antall (${fmtNumber(l.liters, 4)} l) for ${l.avgiftstype} ${l.avgiftsgruppe}` +
+          `${l.tilleggskode ? ` kode ${l.tilleggskode}` : ''} ${l.periode} — korreksjon uten tilhørende bevegelse.`);
+      } else if (l.liters > 0) {
+        lines.push(l);
+      }
+    });
+    if (errors.length) throw new SaeravgiftError(errors);
+
+    lines.sort((a, b) =>
       a.avgiftstype.localeCompare(b.avgiftstype) ||
       a.avgiftsgruppe.localeCompare(b.avgiftsgruppe) ||
       a.tilleggskode.localeCompare(b.tilleggskode) ||
@@ -224,26 +250,27 @@
   }
 
   // ----------------------------------------------------------
-  // CSV-fil (UTF-8 uten BOM, CRLF)
+  // CSV-fil (UTF-8 uten BOM, CRLF). Hver L-linje har ALLTID hele malen
+  // med 9 felt og 9 semikolon; antall2 og satsår står tomme når de ikke
+  // er aktuelle for gruppen.
   // ----------------------------------------------------------
+  function buildCsvLine(l) {
+    return [
+      'L',
+      l.linjenr,
+      l.avgiftstype,
+      l.avgiftsgruppe,
+      l.tilleggskode,
+      l.periode,
+      fmtNumber(l.liters, 4),
+      l.styrke != null ? fmtNumber(l.styrke, 1) : '',
+      l.satsaar || ''
+    ].join(';') + ';';
+  }
+
   function buildCsv(orgnr, lines) {
     const out = [`O;${String(orgnr).replace(/\s/g, '')};`];
-    lines.forEach(l => {
-      const fields = [
-        'L',
-        l.linjenr,
-        l.avgiftstype,
-        l.avgiftsgruppe,
-        l.tilleggskode,
-        l.periode,
-        fmtNumber(l.liters, 4),
-        l.styrke != null ? fmtNumber(l.styrke, 1) : ''
-      ];
-      // Satsår brukes kun for avgiftstype TF; ellers utelates feltet
-      // (jf. Skatteetatens eksempel «L;1;BV;516;;2026/09;12;12;»).
-      if (l.satsaar) fields.push(l.satsaar);
-      out.push(fields.join(';') + ';');
-    });
+    lines.forEach(l => out.push(buildCsvLine(l)));
     return out.join('\r\n');
   }
 
@@ -252,9 +279,11 @@
   }
 
   // ----------------------------------------------------------
-  // Forhåndsvisning av avgift (Skatteetaten beregner selv endelig beløp)
+  // Estimert avgift — kun for visning. Skatteetaten beregner endelig beløp.
   //   515–517: liter × styrke × sats     512–514: liter × sats
-  // Linjene rundes til øre, totalen rundes NED til hele kroner.
+  // Beløp per bevegelse regnes i hele øre med gulv-avrunding (også for
+  // negative beløp: −97,375 → −97,38). Korreksjonsrader speiler beløpet
+  // til bevegelsen de reverserer, så de opphever hverandre eksakt.
   // ----------------------------------------------------------
   function resolveSats(group, rates) {
     if (group.sats != null && group.sats !== '') return Number(group.sats);
@@ -262,66 +291,77 @@
     return null;
   }
 
-  function lineAmountOre(line, sats) {
-    const grunnlag = line.group.perVolPct ? line.liters * line.styrke : line.liters;
-    return Math.round(grunnlag * sats * 100 * line.code.avgiftFortegn);
-  }
-
-  function preview(lines, rates) {
-    let totalOre = 0;
-    const missingSats = [];
-    const rows = lines.map(l => {
-      const sats = resolveSats(l.group, rates);
-      let avgiftOre = null;
-      if (l.code.avgiftFortegn === 0) avgiftOre = 0;
-      else if (sats == null) missingSats.push(l.avgiftsgruppe);
-      else avgiftOre = lineAmountOre(l, sats);
-      if (avgiftOre != null) totalOre += avgiftOre;
-      return { ...l, sats, avgift: avgiftOre == null ? null : avgiftOre / 100 };
-    });
-    const total = totalOre / 100;
-    return {
-      rows,
-      total,
-      totalAvrundet: Math.floor(total),
-      missingSats: [...new Set(missingSats)]
-    };
+  function movementAmountOre(c, sats) {
+    if (c.code.avgiftFortegn === 0) return 0;
+    if (sats == null) return null;
+    // Heltallsregning: liter i 1/10000, styrke i 1/10, sats i øre
+    const l4 = Math.round(Math.abs(c.liters) * 10000);
+    const ore = Math.round(sats * 100);
+    const num = c.group.perVolPct ? l4 * Math.round(c.styrke * 10) * ore : l4 * ore;
+    const den = c.group.perVolPct ? 100000 : 10000;
+    const signed = c.code.avgiftFortegn > 0 ? Math.floor(num / den) : Math.floor(-num / den);
+    return c.liters < 0 ? -signed : signed;
   }
 
   // ----------------------------------------------------------
-  // Spesifikasjon (dokumentasjon, lastes IKKE opp): én rad per bevegelse
+  // Spesifikasjon (dokumentasjon, lastes IKKE opp): én rad per bevegelse,
+  // inkludert korreksjonsrader og bevegelser som er korrigert bort.
   // ----------------------------------------------------------
-  function specificationRows(lines, rates) {
-    const rows = [];
-    lines.forEach(l => {
-      const sats = resolveSats(l.group, rates);
-      l.movements.forEach(c => {
-        const m = c.movement;
-        let avgift = null;
-        if (l.code.avgiftFortegn === 0) avgift = 0;
-        else if (sats != null) avgift = lineAmountOre({ ...l, liters: c.liters }, sats) / 100;
-        rows.push({
-          'Linjenr i fil': l.linjenr,
+  function specification(classified, rates) {
+    return classified.map(c => {
+      const m = c.movement;
+      const sats = resolveSats(c.group, rates);
+      const ore = movementAmountOre(c, sats);
+      return {
+        linjenr: c.linjenr,
+        ore,
+        row: {
+          'Linjenr i fil': c.linjenr == null ? '' : c.linjenr,
           'Dato': m.date || '',
           'Bevegelsestype': c.code.label,
+          'Dokumentreferanse': m.document_ref || '',
           'Vare': c.product.name || '',
           'Produsent': c.product.producer || '',
           'Kunde': (m.customer && m.customer.name) || '',
           'Flasker': m.bottles != null ? Number(m.bottles) : '',
           'Liter': Number(fmtNumber(c.liters, 4)),
           'Styrke %': Number(c.product.alcohol_pct),
-          'Avgiftstype': l.avgiftstype,
-          'Avgiftsgruppe': l.avgiftsgruppe,
-          'Tilleggskode': l.tilleggskode,
-          'Periode': l.periode,
+          'Avgiftstype': c.group.avgiftstype,
+          'Avgiftsgruppe': c.group.avgiftsgruppe,
+          'Tilleggskode': c.code.kode,
+          'Periode': c.periode,
           'Opprinnelig uttaksperiode': m.original_period ? toPeriode(m.original_period) : '',
+          'Korrigerer bevegelse': m.corrects_id || '',
+          'Registrert': m.recorded_at || '',
+          'Bevegelses-ID': m.id || '',
           'Sats': sats == null ? '' : sats,
-          'Beregnet avgift (kr)': avgift == null ? '' : avgift,
+          'Estimert avgift (kr)': ore == null ? '' : ore / 100,
           'Notat': m.notes || ''
-        });
-      });
+        }
+      };
     });
-    return rows;
+  }
+
+  // Forhåndsvisning bygges KUN fra spesifikasjonsradene: linjebeløp og
+  // totalsum er summen av radene bak dem, aldri regnet separat.
+  function preview(lines, spec) {
+    const missingSats = new Set();
+    const rows = lines.map(l => {
+      const entries = spec.filter(e => e.linjenr === l.linjenr);
+      const missing = entries.some(e => e.ore == null);
+      if (missing) missingSats.add(l.avgiftsgruppe);
+      const lineOre = entries.reduce((a, e) => a + (e.ore || 0), 0);
+      const sats = entries.length && entries[0].row['Sats'] !== '' ? entries[0].row['Sats'] : null;
+      return { ...l, sats, avgift: missing ? null : lineOre / 100 };
+    });
+    const totalOre = spec.reduce((a, e) => a + (e.ore || 0), 0);
+    return {
+      rows,
+      totalOre,
+      total: totalOre / 100,
+      totalAvrundet: Math.floor(totalOre / 100), // gulv, også for negative summer
+      missingSats: [...missingSats]
+    };
   }
 
   // ----------------------------------------------------------
@@ -332,7 +372,9 @@
     const classified = classify(movements, period, config);
     if (!classified.length) throw new SaeravgiftError([`Ingen lagerbevegelser i ${period}.`]);
     const lines = aggregate(classified);
+    if (!lines.length) throw new SaeravgiftError([`Alle bevegelser i ${period} er korrigert bort — ingen linjer å rapportere.`]);
     const orgnr = String(config.orgnr).replace(/\s/g, '');
+    const spec = specification(classified, rates);
     return {
       orgnr,
       period,
@@ -340,9 +382,67 @@
       csv: buildCsv(orgnr, lines),
       csvFileName: fileName(orgnr, period, 'csv'),
       specFileName: `saeravgift_spesifikasjon_${orgnr}_${period}.xlsx`,
-      preview: preview(lines, rates),
-      specification: specificationRows(lines, rates)
+      preview: preview(lines, spec),
+      specification: spec.map(e => e.row)
     };
+  }
+
+  // ----------------------------------------------------------
+  // Tilleggskode-tabellen: validering av (utvidbar) konfigurasjon.
+  // Nye bevegelsestyper/koder legges til som data, uten kodeendring.
+  // ----------------------------------------------------------
+  function validateMovementCodes(codes) {
+    const errors = [];
+    const seen = new Set();
+    (codes || []).forEach(c => {
+      const t = c.type || '';
+      if (!/^[a-z0-9_]+$/.test(t)) errors.push(`Bevegelsestype «${t}» må bestå av små bokstaver, tall og _.`);
+      else if (seen.has(t)) errors.push(`Bevegelsestype «${t}» finnes flere ganger.`);
+      seen.add(t);
+      if (!String(c.label || '').trim()) errors.push(`Bevegelsestype «${t}» mangler navn.`);
+      if (c.kode && !/^\d{2}$/.test(c.kode)) errors.push(`Tilleggskode for «${c.label || t}» må være to siffer eller tom.`);
+      if (c.lagerRetning !== 1 && c.lagerRetning !== -1) errors.push(`Lagerretning for «${c.label || t}» må være inn eller ut.`);
+      if (![1, 0, -1].includes(c.avgiftFortegn)) errors.push(`Avgiftsbehandling for «${c.label || t}» er ugyldig.`);
+    });
+    if (!seen.has('salg')) errors.push('Bevegelsestypen «salg» (ordinært salg) må finnes.');
+    return errors;
+  }
+
+  // ----------------------------------------------------------
+  // Append-only lager: en feilført bevegelse rettes med en korreksjonsrad
+  // som reverserer den (samme dato og felter, negativt antall). Riktig
+  // bevegelse registreres deretter som en ny rad.
+  //   original:  raden som skal korrigeres
+  //   copyFields: feltene som kopieres (ulikt for stock_in/stock_out)
+  //   existing:  alle rader i tabellen (for å hindre dobbel korreksjon)
+  // ----------------------------------------------------------
+  function buildReversal(original, copyFields, existing) {
+    if (!original || original.id == null) throw new SaeravgiftError(['Fant ikke bevegelsen som skal korrigeres.']);
+    if (isCorrection(original)) throw new SaeravgiftError(['En korreksjonsrad kan ikke korrigeres. Registrer en ny bevegelse i stedet.']);
+    if (!(Number(original.bottles) > 0)) throw new SaeravgiftError(['Bevegelsen har ugyldig antall og kan ikke korrigeres.']);
+    if ((existing || []).some(r => r.corrects_id === original.id)) {
+      throw new SaeravgiftError(['Bevegelsen er allerede korrigert.']);
+    }
+    const row = {};
+    copyFields.forEach(f => { if (original[f] !== undefined) row[f] = original[f]; });
+    row.bottles = -Number(original.bottles);
+    row.corrects_id = original.id;
+    return row;
+  }
+
+  // SHA-256 (hex) av nøyaktig de bytene som lastes ned (UTF-8)
+  async function sha256Hex(text) {
+    const bytes = new TextEncoder().encode(text);
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+    return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // Sammenlign gjeldende fil med siste eksport for perioden
+  function exportStatus(currentHash, exportsForPeriod) {
+    const sorted = [...(exportsForPeriod || [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    const last = sorted[0] || null;
+    if (!last) return { state: 'new', last: null };
+    return { state: last.sha256 === currentHash ? 'unchanged' : 'changed', last };
   }
 
   return {
@@ -358,9 +458,16 @@
     findMovementCode,
     classify,
     aggregate,
+    buildCsvLine,
     buildCsv,
+    movementAmountOre,
+    specification,
     preview,
-    specificationRows,
-    buildExport
+    buildExport,
+    validateMovementCodes,
+    buildReversal,
+    isCorrection,
+    sha256Hex,
+    exportStatus
   };
 });
