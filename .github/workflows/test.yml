@@ -1,0 +1,26 @@
+name: Tester
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enhetstester (særavgiftsmelding)
+        run: node --test tests/*.test.js
+      - name: Syntakssjekk av JavaScript i index.html
+        run: |
+          node -e "
+            const src = require('fs').readFileSync('index.html', 'utf8');
+            const scripts = [...src.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
+            if (!scripts.length) throw new Error('Fant ingen inline-script i index.html');
+            scripts.forEach(code => new Function(code));
+            console.log('OK:', scripts.length, 'script-blokk(er)');
+          "
