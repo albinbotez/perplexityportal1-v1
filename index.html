@@ -596,6 +596,8 @@
     .sa-config-scroll { overflow-x: auto; }
     .sa-errors { background: var(--accent-red-bg); border: 1px solid var(--accent-red); color: var(--accent-red); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 13px; margin-bottom: 14px; }
     .sa-errors ul { margin: 6px 0 0 18px; }
+    .sa-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 6px 0 0; font-size: 12px; color: var(--text-secondary); cursor: pointer; }
+    .sa-toggle input { width: auto; margin: 0; }
     .sa-note { font-size: 12px; color: var(--text-muted); line-height: 1.6; margin-top: 10px; }
 
 
@@ -957,6 +959,7 @@
 
         <div class="page-header" style="margin-top: 4px;">
           <div class="page-title" style="font-size: 16px;">Historikk — Mottak</div>
+          <label class="sa-toggle"><input type="checkbox" id="si-show-corrected" onchange="renderStockInTable()"/> Vis rettede rader <span id="si-hidden-count"></span></label>
         </div>
         <div class="table-wrap">
           <table>
@@ -1041,6 +1044,7 @@
 
         <div class="page-header" style="margin-top: 4px;">
           <div class="page-title" style="font-size: 16px;">Historikk — Salg</div>
+          <label class="sa-toggle"><input type="checkbox" id="so-show-corrected" onchange="renderStockOutTable()"/> Vis rettede rader <span id="so-hidden-count"></span></label>
         </div>
         <div class="table-wrap">
           <table>
@@ -1512,6 +1516,26 @@ function correctionCell(s, corrected, fn) {
   return `<button class="btn-danger" onclick="${fn}('${s.id}')">Korriger</button>`;
 }
 
+// Historikklister: korreksjoner står rett under raden de retter. Rettede
+// par (Korrigert + Korreksjon) skjules som standard; de påvirker ikke
+// summene, men vises når «Vis rettede rader» er krysset av.
+function historyRows(rows, dateField, toggleId, countId) {
+  const corrected = correctedIds(rows);
+  const show = document.getElementById(toggleId)?.checked;
+  const ordered = Saeravgift.orderWithCorrections(rows, dateField);
+  const visible = show ? ordered : ordered.filter(r => !r.corrects_id && !corrected.has(r.id));
+  const hidden = ordered.length - visible.length;
+  const countEl = document.getElementById(countId);
+  if (countEl) countEl.textContent = hidden ? `(${hidden} skjult)` : '';
+  return { corrected, visible };
+}
+
+function correctionRowStyle(s, corrected) {
+  if (s.corrects_id) return 'opacity:0.6; box-shadow: inset 3px 0 0 var(--accent-yellow);';
+  if (corrected.has(s.id)) return 'opacity:0.6;';
+  return '';
+}
+
 function docRefNote(s) {
   return s.document_ref ? `<br><span style="font-size:11px;color:var(--text-muted);">Dok: ${esc(s.document_ref)}</span>` : '';
 }
@@ -1867,14 +1891,14 @@ function renderStockInTable() {
     tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><p>Ingen mottak registrert ennå.</p></div></td></tr>`;
     return;
   }
-  const corrected = correctedIds(cacheStockIn);
-  tbody.innerHTML = cacheStockIn.map(s => {
+  const { corrected, visible } = historyRows(cacheStockIn, 'received_date', 'si-show-corrected', 'si-hidden-count');
+  tbody.innerHTML = visible.map(s => {
     const total        = s.bottles * s.purchase_price_per_bottle;
     const p            = s.product;
     const taxPerBottle = p ? calcTax(p.type, p.alcohol_pct, 1) : 0;
     const priceWithTax = s.purchase_price_per_bottle + taxPerBottle;
-    return `<tr style="${s.corrects_id || corrected.has(s.id) ? 'opacity:0.6;' : ''}">
-      <td>${fmtDate(s.received_date)}${docRefNote(s)}</td>
+    return `<tr style="${correctionRowStyle(s, corrected)}">
+      <td>${s.corrects_id ? '↳ ' : ''}${fmtDate(s.received_date)}${docRefNote(s)}</td>
       <td style="font-weight:600;">${esc(p?.name || '—')}</td>
       <td>${esc(p?.producer || '—')}</td>
       <td>${s.bottles} fl.</td>
@@ -1922,9 +1946,14 @@ async function submitStockIn() {
 }
 
 async function correctStockIn(id) {
-  if (!confirm('Korrigere dette mottaket?\n\nMottaket slettes ikke. Det reverseres med en korreksjonsrad (samme dato, negativt antall), og skjemaet fylles ut slik at du kan registrere riktig mottak.')) return;
+  if (!confirm('Korrigere dette mottaket?\n\nMottaket nulles ut med en korreksjonsrad (samme dato, negativt antall). Det slettes ikke, men skjules fra listen.')) return;
   const original = await insertCorrection('stock_in', cacheStockIn, id, STOCK_IN_COPY_FIELDS);
   if (!original) return;
+  if (!confirm('Mottaket er nullet ut.\n\nVil du registrere en riktig versjon nå?\n\nOK = fyll ut skjemaet med de gamle verdiene, så du kan rette dem\nAvbryt = ferdig (mottaket var registrert ved en feil)')) {
+    toast('Mottaket er nullet ut og fjernet fra lagerbeholdningen.', 'success');
+    await loadStockIn();
+    return;
+  }
   document.getElementById('si-product').value = original.product_id;
   document.getElementById('si-bottles').value = original.bottles;
   document.getElementById('si-price').value   = original.purchase_price_per_bottle;
@@ -1932,7 +1961,7 @@ async function correctStockIn(id) {
   document.getElementById('si-docref').value  = original.document_ref || '';
   updateStockInPreview();
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  toast('Mottaket er reversert. Rett opp verdiene i skjemaet og registrer riktig mottak.', 'success');
+  toast('Rett opp verdiene i skjemaet og trykk «Registrer mottak».', 'success');
   await loadStockIn();
 }
 
@@ -1964,13 +1993,13 @@ function renderStockOutTable() {
     tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><p>Ingen salg registrert ennå.</p></div></td></tr>`;
     return;
   }
-  const corrected = correctedIds(cacheStockOut);
-  tbody.innerHTML = cacheStockOut.map(s => {
+  const { corrected, visible } = historyRows(cacheStockOut, 'sale_date', 'so-show-corrected', 'so-hidden-count');
+  tbody.innerHTML = visible.map(s => {
     const p   = s.product;
     const tax = p ? calcTax(p.type, p.alcohol_pct, s.bottles) : 0;
     const rate = p ? TAX_RATES[p.type] : 0;
-    return `<tr style="${s.corrects_id || corrected.has(s.id) ? 'opacity:0.6;' : ''}">
-      <td>${fmtDate(s.sale_date)}${docRefNote(s)}</td>
+    return `<tr style="${correctionRowStyle(s, corrected)}">
+      <td>${s.corrects_id ? '↳ ' : ''}${fmtDate(s.sale_date)}${docRefNote(s)}</td>
       <td style="font-weight:600;">${esc(p?.name || '—')}</td>
       <td>${esc(s.customer?.name || '—')}${movementTypeNote(s)}</td>
       <td>${p ? `<span class="badge ${p.type}">${p.type === 'brennevin' ? 'Brennevin' : 'Vin'}</span>` : '—'}</td>
@@ -2061,9 +2090,14 @@ function movementTypeNote(s) {
 }
 
 async function correctStockOut(id) {
-  if (!confirm('Korrigere denne bevegelsen?\n\nBevegelsen slettes ikke. Den reverseres med en korreksjonsrad (samme dato, negativt antall), og skjemaet fylles ut slik at du kan registrere riktig bevegelse.\n\nGjelder den en periode som allerede er rapportert, må det sendes endringsmelding for perioden.')) return;
+  if (!confirm('Korrigere denne bevegelsen?\n\nBevegelsen nulles ut med en korreksjonsrad (samme dato, negativt antall). Den slettes ikke, men skjules fra listen.\n\nGjelder den en periode som allerede er rapportert, må det sendes endringsmelding for perioden.')) return;
   const original = await insertCorrection('stock_out', cacheStockOut, id, STOCK_OUT_COPY_FIELDS);
   if (!original) return;
+  if (!confirm('Bevegelsen er nullet ut.\n\nVil du registrere en riktig versjon nå?\n\nOK = fyll ut skjemaet med de gamle verdiene, så du kan rette dem\nAvbryt = ferdig (bevegelsen var registrert ved en feil)')) {
+    toast('Bevegelsen er nullet ut.', 'success');
+    await loadStockOut();
+    return;
+  }
   document.getElementById('so-product').value  = original.product_id;
   document.getElementById('so-customer').value = original.customer_id || '';
   document.getElementById('so-bottles').value  = original.bottles;
@@ -2073,7 +2107,7 @@ async function correctStockOut(id) {
   document.getElementById('so-docref').value   = original.document_ref || '';
   updateSaleTypeFields();
   window.scrollTo({ top: 0, behavior: 'smooth' });
-  toast('Bevegelsen er reversert. Rett opp verdiene i skjemaet og registrer riktig bevegelse.', 'success');
+  toast('Rett opp verdiene i skjemaet og trykk «Registrer salg».', 'success');
   await loadStockOut();
 }
 
