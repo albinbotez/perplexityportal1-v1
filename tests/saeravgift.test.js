@@ -290,3 +290,21 @@ test('hash av filinnhold (SHA-256) og status mot forrige eksport', async () => {
   assert.equal(S.exportStatus(hash, log).state, 'unchanged');
   assert.equal(S.exportStatus('annen', log).state, 'changed');
 });
+
+// ------------------------------------------------------------
+// Historikklister: korreksjoner rett under raden de retter
+// ------------------------------------------------------------
+test('historikk sorteres slik at korreksjonen står rett under raden den retter', () => {
+  const pr = name => ({ name });
+  const rows = [
+    { id: 'ny',   received_date: '2026-09-24', product: pr('Cuvée'),      bottles: 1,   recorded_at: '2026-09-24T12:00Z' },
+    { id: 'k1',   received_date: '2026-09-24', product: pr('Chardonnay'), bottles: -90, recorded_at: '2026-09-24T11:00Z', corrects_id: 'c1' },
+    { id: 'b',    received_date: '2026-09-24', product: pr('Cuvée'),      bottles: 30,  recorded_at: '2026-09-24T09:05Z' },
+    { id: 'kA',   received_date: '2026-09-24', product: pr('Cuvée'),      bottles: -30, recorded_at: '2026-09-24T11:30Z', corrects_id: 'a' },
+    { id: 'eldre',received_date: '2026-09-20', product: pr('Aligoté'),    bottles: 10,  recorded_at: '2026-09-20T09:00Z' },
+    { id: 'a',    received_date: '2026-09-24', product: pr('Cuvée'),      bottles: 30,  recorded_at: '2026-09-24T09:00Z' },
+    { id: 'c1',   received_date: '2026-09-24', product: pr('Chardonnay'), bottles: 90,  recorded_at: '2026-09-24T09:10Z' }
+  ];
+  assert.deepEqual(S.orderWithCorrections(rows, 'received_date').map(r => r.id),
+    ['c1', 'k1', 'a', 'kA', 'b', 'ny', 'eldre']);
+});

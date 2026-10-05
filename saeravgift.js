@@ -430,6 +430,23 @@
     return row;
   }
 
+  // Sortering for historikklister: nyeste dato først, deretter vare, og
+  // innenfor samme dato og vare i registreringsrekkefølge. En korreksjons-
+  // rad plasseres alltid rett under raden den reverserer.
+  function orderWithCorrections(rows, dateField) {
+    const byId = new Map((rows || []).map(r => [r.id, r]));
+    const anchor = r => (r.corrects_id && byId.get(r.corrects_id)) || r;
+    const recorded = r => String(r.recorded_at || r.created_at || '');
+    return [...(rows || [])].sort((a, b) => {
+      const A = anchor(a), B = anchor(b);
+      return String(B[dateField] || '').localeCompare(String(A[dateField] || ''))
+        || String((A.product && A.product.name) || '').localeCompare(String((B.product && B.product.name) || ''), 'no')
+        || recorded(A).localeCompare(recorded(B))
+        || String(A.id).localeCompare(String(B.id))
+        || (a.corrects_id ? 1 : 0) - (b.corrects_id ? 1 : 0);
+    });
+  }
+
   // SHA-256 (hex) av nøyaktig de bytene som lastes ned (UTF-8)
   async function sha256Hex(text) {
     const bytes = new TextEncoder().encode(text);
@@ -467,6 +484,7 @@
     validateMovementCodes,
     buildReversal,
     isCorrection,
+    orderWithCorrections,
     sha256Hex,
     exportStatus
   };
